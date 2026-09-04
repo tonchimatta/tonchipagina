@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>Tonchi</title>
 <style>
   :root {
@@ -26,6 +26,15 @@
     width: 100%; height: 100%;
     pointer-events: none;
     z-index: 1;
+  }
+  /* Everything that is part of the picture lives in here, so one scale
+     zooms the whole scene. The threads are drawn on the canvas at full
+     device resolution instead, which keeps them crisp when zoomed. */
+  #world {
+    position: absolute; inset: 0;
+    transform-origin: 50% 50%;
+    will-change: transform;
+    z-index: 2;
   }
   #girl {
     position: absolute;
@@ -69,16 +78,54 @@
     letter-spacing: .005em;
     color: #3a3a3a;
   }
+
+  #controls {
+    position: fixed;
+    left: 18px; bottom: 18px;
+    z-index: 10;
+    display: flex;
+    gap: 7px;
+  }
+  #controls button {
+    width: 34px; height: 34px;
+    display: grid; place-items: center;
+    padding: 0;
+    border: 1px solid rgba(0,0,0,.13);
+    border-radius: 50%;
+    background: rgba(255,255,255,.9);
+    color: #444;
+    font: 500 15px/1 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    cursor: pointer;
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    transition: background .18s ease, color .18s ease, border-color .18s ease;
+  }
+  #controls button:hover:not(:disabled) { background: #fff; color: var(--thread); border-color: rgba(224,49,39,.4); }
+  #controls button:disabled { opacity: .32; cursor: default; }
+  #controls button:focus-visible { outline: 2px solid var(--thread); outline-offset: 2px; }
+  #controls svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
   @media (max-width: 860px) {
     #girl { height: 34vh; right: 50%; transform: translateX(50%); }
     .card figcaption { font-size: 9.5px; line-height: 1.28; }
+    #controls { left: 12px; bottom: 12px; }
   }
 </style>
 </head>
 <body>
 <div id="stage">
   <canvas id="threads"></canvas>
-  <img id="girl" src="girl.png" alt="" draggable="false">
+  <div id="world">
+    <img id="girl" src="girl.png" alt="" draggable="false">
+  </div>
+</div>
+
+<div id="controls">
+  <button id="zoomOut" type="button" aria-label="Alejar" title="Alejar">&minus;</button>
+  <button id="zoomIn" type="button" aria-label="Acercar" title="Acercar">+</button>
+  <button id="reset" type="button" aria-label="Volver a ordenar" title="Volver a ordenar">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4.4h-4.4"/></svg>
+  </button>
 </div>
 
 <script>
@@ -136,6 +183,7 @@
 
   // ---------------------------------------------------------------- dom
   const stage = document.getElementById('stage');
+  const world = document.getElementById('world');
   const canvas = document.getElementById('threads');
   const ctx = canvas.getContext('2d');
   const girl = document.getElementById('girl');
@@ -143,6 +191,37 @@
   let W = 0, H = 0, DPR = 1, narrow = false;
   let head = { x: 0, y: 0 };
   let topZ = 10;
+
+  // ---------------------------------------------------------------- zoom
+  // Card and thread coordinates are world coordinates: the layout as it
+  // would sit at zoom 1. Zoom scales the whole scene about the middle of
+  // the screen, so pulling back only ever reveals more room around it.
+  const MIN_ZOOM = 0.45, MAX_ZOOM = 1;
+  let zoom = 1;
+
+  const toWorldX = sx => (sx - W / 2) / zoom + W / 2;
+  const toWorldY = sy => (sy - H / 2) / zoom + H / 2;
+
+  function applyZoom() {
+    world.style.transform = 'scale(' + zoom + ')';
+    document.getElementById('zoomOut').disabled = zoom <= MIN_ZOOM + 1e-4;
+    document.getElementById('zoomIn').disabled = zoom >= MAX_ZOOM - 1e-4;
+  }
+
+  function setZoom(z) {
+    const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
+    if (Math.abs(next - zoom) < 1e-4) return;
+    zoom = next;
+    applyZoom();
+    // pulling back gives more room, pushing in takes it away
+    for (const c of cards) {
+      if (c.dragging || c.settleAt) continue;
+      const b = bounds(c);
+      c.tx = Math.min(Math.max(c.tx, b.minX), b.maxX);
+      c.ty = Math.min(Math.max(c.ty, b.minY), b.maxY);
+      c.homeX = c.tx; c.homeY = c.ty;
+    }
+  }
 
   const cards = ITEMS.map((item, i) => {
     const fig = document.createElement('figure');
@@ -153,50 +232,66 @@
              'style="aspect-ratio:' + item.ar + '">' +
         '<figcaption>' + item.text + '</figcaption>' +
       '</a>';
-    stage.appendChild(fig);
+    world.appendChild(fig);
     return {
       item, i, el: fig, link: fig.querySelector('a'),
-      x: 0, y: 0, vx: 0, vy: 0,      // centre and velocity, px
+      x: 0, y: 0, vx: 0, vy: 0,      // centre and velocity, world px
       tx: 0, ty: 0,                   // spring target
-      rot: 0, w: 0, h: 0,
+      homeX: 0, homeY: 0,             // where the layout puts it
+      rot: 0, sc: 1, w: 0, h: 0,
       phase: (i * 2.399) % (Math.PI * 2),
       dragging: false, pointerId: null,
       grabDX: 0, grabDY: 0,
       downX: 0, downY: 0, downT: 0, moved: false,
       fx: null, fy: null,             // position the visitor chose
+      settleAt: 0,                    // when it is let go of the middle
       rope: null,
     };
   });
 
   // ------------------------------------------------------------- threads
-  // The thread has no weight of its own. It is held up by a rest shape:
-  // a cubic bezier that leaves the crown almost vertically, so every
-  // thread bundles at the knot before splaying out to its card. Each
-  // point chases its place on that curve through a viscous lag, which is
-  // what makes the thread flow and trail when a card is pulled away and
-  // then gather itself back into the arc.
-  const SEG = 26;
-  const LAG = 7.2;        // how fast a point catches up to the rest shape (1/s)
-  const GLIDE = 0.90;     // velocity retained per step: the viscosity
-  const EVEN_ITERS = 2;   // constraint passes that keep the spacing even
-  const EVEN_FORCE = 0.12;
+  // The thread has no weight of its own. It is held up by a rest shape: a
+  // cubic bezier that leaves the crown almost vertically, so every thread
+  // gathers into one bundle at the knot before splaying out to its card.
+  const SEG = 28;
+
+  // A string tied at both ends cannot swing where it is tied. Points near
+  // the knot and near the picture are held tight to that curve, and the
+  // slack, so the travel, belongs to the free middle of the span. This is
+  // what stops the thread squirming right where it meets the picture.
+  const LAG_END = 46;     // catch-up rate at a tied end (1/s)
+  const LAG_MID = 13;     // catch-up rate mid-span (1/s)
+  const PIN_SPAN = 0.24;  // fraction of the span each end holds taut
+  const GLIDE = 0.855;    // velocity retained per step: the viscosity
+  const EVEN_ITERS = 2;
+  const EVEN_FORCE = 0.10;
+
+  const lagAt = new Float64Array(SEG + 1);
+  for (let k = 0; k <= SEG; k++) {
+    const t = k / SEG;
+    const edge = Math.min(t, 1 - t) / PIN_SPAN;
+    const pin = edge >= 1 ? 0 : (1 - edge) * (1 - edge);
+    lagAt[k] = LAG_MID + (LAG_END - LAG_MID) * pin;
+  }
 
   function makeRope() {
     const pts = [];
     for (let k = 0; k <= SEG; k++) pts.push({ x: 0, y: 0, px: 0, py: 0, rx: 0, ry: 0 });
-    return { pts, len: 0 };
+    return { pts, len: 0, rest: 0 };
   }
 
-  // Rest shape control points. a is the card anchor (with the outward
-  // normal of the edge it is tied to), hx/hy the knot on the head.
+  // Rest shape control points. a is the card anchor, carrying the outward
+  // normal of the edge it is tied to; hx/hy is the knot on the head. Both
+  // control arms are capped, so a long thread cannot fling its handle far
+  // off the picture and bend the curve somewhere it has no business being.
   function restShape(a, hx, hy, wob) {
     let dx = a.x - hx, dy = a.y - hy;
     const L = Math.hypot(dx, dy) || 1;
     dx /= L; dy /= L;
 
-    // Leaving the knot: mostly straight up, leaned toward the card's side.
-    // The strong upward term is what ties every thread into one bundle.
-    let bx = dx, by = dy - 1.15;
+    // Leaving the knot: up, leaned toward the card's side. The upward
+    // term is what ties every thread into one bundle at the crown.
+    let bx = dx, by = dy - 0.95;
     const bl = Math.hypot(bx, by) || 1;
     bx /= bl; by /= bl;
 
@@ -206,12 +301,15 @@
     let ex = a.nx + (-dx) * 1.1, ey = a.ny + (-dy) * 1.1;
     const el = Math.hypot(ex, ey) || 1;
     ex /= el; ey /= el;
-    const out = Math.min(L * 0.22, 180);
+
+    const armKnot = Math.min(L * 0.32, 230);
+    const armCard = Math.min(L * 0.20, 150);
+    const sway = wob * Math.min(1, L / 520);
 
     return {
       p0x: hx, p0y: hy,
-      p1x: hx + bx * L * 0.36, p1y: hy + by * L * 0.36 + wob * Math.min(1, L / 420),
-      p2x: a.x + ex * out, p2y: a.y + ey * out - wob * (out / 180),
+      p1x: hx + bx * armKnot, p1y: hy + by * armKnot + sway,
+      p2x: a.x + ex * armCard, p2y: a.y + ey * armCard - sway * 0.5,
       p3x: a.x, p3y: a.y,
     };
   }
@@ -226,8 +324,8 @@
   const tmp = { x: 0, y: 0 };
 
   // The rest points are spread by arc length, not by the curve's own
-  // parameter. Spacing them evenly is what keeps the thread from rippling
-  // where the arc turns tightest.
+  // parameter. Even spacing is what keeps the thread from rippling where
+  // the arc turns tightest.
   const SAMP = 72;
   const sxs = new Float64Array(SAMP + 1);
   const sys = new Float64Array(SAMP + 1);
@@ -243,6 +341,7 @@
       if (k) total += Math.hypot(tmp.x - sxs[k - 1], tmp.y - sys[k - 1]);
       sxs[k] = tmp.x; sys[k] = tmp.y; sls[k] = total;
     }
+    rope.rest = total;
 
     let j = 0;
     for (let i = 0; i <= SEG; i++) {
@@ -261,26 +360,23 @@
 
   function stepRope(rope, dt) {
     const pts = rope.pts, n = pts.length;
-    const catchUp = 1 - Math.exp(-LAG * dt);
 
     for (let k = 1; k < n - 1; k++) {
       const p = pts[k];
+      const catchUp = 1 - Math.exp(-lagAt[k] * dt);
       const vx = (p.x - p.px) * GLIDE;
       const vy = (p.y - p.py) * GLIDE;
       p.px = p.x; p.py = p.y;
       p.x += vx + (p.rx - p.x) * catchUp;
       p.y += vy + (p.ry - p.y) * catchUp;
     }
-    // the ends are pinned: the knot and the card anchor
+    // the ends are tied: the knot on the head, and the picture
     pts[0].x = pts[0].rx; pts[0].y = pts[0].ry;
     pts[n - 1].x = pts[n - 1].rx; pts[n - 1].y = pts[n - 1].ry;
 
-    // Even out the spacing so the thread reads as one continuous filament
-    // instead of bunching where it turns.
-    let target = 0;
-    for (let k = 0; k < n - 1; k++) target += Math.hypot(pts[k + 1].rx - pts[k].rx, pts[k + 1].ry - pts[k].ry);
-    target /= (n - 1);
-
+    // Keep the spacing even so the thread reads as one filament rather
+    // than bunching where it turns.
+    const target = rope.rest / (n - 1);
     for (let it = 0; it < EVEN_ITERS; it++) {
       for (let k = 0; k < n - 1; k++) {
         const a = pts[k], b = pts[k + 1];
@@ -301,9 +397,7 @@
   function drawRope(rope) {
     const p = rope.pts, n = p.length;
     // A thread thins a touch as it is drawn out, the way a filament does.
-    let rest = 0;
-    for (let k = 0; k < n - 1; k++) rest += Math.hypot(p[k + 1].rx - p[k].rx, p[k + 1].ry - p[k].ry);
-    const stretch = Math.min(Math.max(rope.len / (rest || 1), 1), 1.7);
+    const stretch = Math.min(Math.max(rope.len / (rope.rest || 1), 1), 1.7);
 
     ctx.beginPath();
     ctx.moveTo(p[0].x, p[0].y);
@@ -311,7 +405,8 @@
       ctx.quadraticCurveTo(p[k].x, p[k].y, (p[k].x + p[k + 1].x) / 2, (p[k].y + p[k + 1].y) / 2);
     }
     ctx.lineTo(p[n - 1].x, p[n - 1].y);
-    ctx.lineWidth = 1.55 / stretch;
+    // Compensate part of the zoom so a pulled-back thread stays readable.
+    ctx.lineWidth = 1.55 / (stretch * Math.pow(zoom, 0.55));
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = THREAD;
@@ -348,34 +443,58 @@
   }
 
   // --------------------------------------------------------------- layout
-  function layout() {
+  // snap places the cards outright; without it they keep their current
+  // position and glide to the new one, so a resize never cuts an entrance
+  // short or teleports a picture out from under the pointer.
+  function layout(snap) {
     W = innerWidth; H = innerHeight;
     DPR = Math.min(devicePixelRatio || 1, 2);
     canvas.width = Math.round(W * DPR);
     canvas.height = Math.round(H * DPR);
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     narrow = W <= 860;
 
     const gr = girl.getBoundingClientRect();
-    head = { x: gr.left + gr.width * HEAD.x, y: gr.top + gr.height * HEAD.y };
+    // girl.png sits inside the scaled world, so undo the scale to read
+    // the knot back in world coordinates.
+    head = {
+      x: toWorldX(gr.left + gr.width * HEAD.x),
+      y: toWorldY(gr.top + gr.height * HEAD.y),
+    };
 
-    if (narrow) packNarrow(gr.top); else placeWide();
+    if (narrow) packNarrow(toWorldY(gr.top)); else placeWide();
 
     for (const c of cards) {
-      const mx = c.w / 2 + 6, my = c.h / 2 + 6;
-      c.x = c.tx = Math.min(Math.max(c.tx, mx), Math.max(mx, W - mx));
-      c.y = c.ty = Math.min(Math.max(c.ty, my), Math.max(my, H - my));
-      c.vx = c.vy = 0;
       if (!c.rope) c.rope = makeRope();
+      const b = bounds(c);
+      c.homeX = Math.min(Math.max(c.homeX, b.minX), b.maxX);
+      c.homeY = Math.min(Math.max(c.homeY, b.minY), b.maxY);
+      if (c.settleAt || c.dragging) continue;   // an entrance or a drag owns the target
+      c.tx = c.homeX; c.ty = c.homeY;
+      if (!snap) continue;
+      c.x = c.tx; c.y = c.ty;
+      c.vx = c.vy = 0;
       setRest(c.rope, anchorOf(c, 0, 0), head.x, head.y, 0);
       snapRope(c.rope);
     }
   }
 
+  // How far a card may travel: the visible world, which grows as you pull
+  // back, so zooming out really does give more room to move things.
+  function bounds(c) {
+    const halfW = W / (2 * zoom), halfH = H / (2 * zoom);
+    const mx = c.w / 2 + 6, my = c.h / 2 + 6;
+    const left = W / 2 - halfW, right = W / 2 + halfW;
+    const top = H / 2 - halfH, bottom = H / 2 + halfH;
+    return {
+      minX: left + mx, maxX: Math.max(left + mx, right - mx),
+      minY: top + my, maxY: Math.max(top + my, bottom - my),
+    };
+  }
+
   function measure() {
     for (const c of cards) {
       const r = c.el.getBoundingClientRect();
-      c.w = r.width; c.h = r.height;
+      c.w = r.width / zoom; c.h = r.height / zoom;
     }
   }
 
@@ -385,8 +504,8 @@
     }
     measure();
     for (const c of cards) {
-      c.tx = (c.fx != null ? c.fx : c.item.wide.pos[0]) * W;
-      c.ty = (c.fy != null ? c.fy : c.item.wide.pos[1]) * H;
+      c.homeX = (c.fx != null ? c.fx : c.item.wide.pos[0]) * W;
+      c.homeY = (c.fy != null ? c.fy : c.item.wide.pos[1]) * H;
     }
   }
 
@@ -397,8 +516,9 @@
     const ROWS = 4, GAP = Math.max(8, H * 0.012);
     const top = H * 0.018;
     const avail = Math.max(120, girlTop - top - H * 0.02);
-    let scale = 1, rowH = [], rowY = [];
+    let rowH = [];
 
+    let scale = 1;
     for (let pass = 0; pass < 9; pass++) {
       for (const c of cards) {
         c.el.style.width =
@@ -412,30 +532,63 @@
       scale *= Math.max(0.86, avail / total);
     }
 
-    rowY = [];
+    const rowY = [];
     let y = top;
     for (let r = 0; r < ROWS; r++) { rowY[r] = y + rowH[r] / 2; y += rowH[r] + GAP; }
 
     for (const c of cards) {
-      if (c.fx != null) { c.tx = c.fx * W; c.ty = c.fy * H; continue; }
-      c.tx = c.item.narrow.x * W;
-      c.ty = rowY[c.item.narrow.row];
+      if (c.fx != null) { c.homeX = c.fx * W; c.homeY = c.fy * H; continue; }
+      c.homeX = c.item.narrow.x * W;
+      c.homeY = rowY[c.item.narrow.row];
     }
   }
 
+  // ---------------------------------------------------------------- entry
+  // Everything arrives stacked in the middle and is drawn out to its place,
+  // one after another, as though the threads reeled them in.
+  const SETTLE_DELAY = 260, SETTLE_STAGGER = 62;
+
+  function gatherToCentre(now) {
+    for (const c of cards) {
+      c.x = W / 2 + Math.cos(c.phase) * 14;
+      c.y = H / 2 + Math.sin(c.phase) * 11;
+      c.tx = c.x; c.ty = c.y;
+      c.vx = c.vy = 0;
+      c.rot = 0;
+      c.sc = 0.86;
+      c.settleAt = now + SETTLE_DELAY + c.i * SETTLE_STAGGER;
+      setRest(c.rope, anchorOf(c, 0, 0), head.x, head.y, 0);
+      snapRope(c.rope);
+    }
+  }
+
+  function resetAll() {
+    setZoom(1);
+    for (const c of cards) { c.fx = c.fy = null; c.el.style.zIndex = ''; c.settleAt = 0; }
+    topZ = 10;
+    layout(false);
+    gatherToCentre(performance.now());
+  }
+
   // ---------------------------------------------------------- interaction
+  // A press has to travel this far before it counts as dragging rather
+  // than as a click opening the article.
+  const DRAG_SLOP = 9;
+
   for (const c of cards) {
     const el = c.el;
     el.addEventListener('dragstart', e => e.preventDefault());
 
     el.addEventListener('pointerdown', e => {
       if (e.button !== undefined && e.button !== 0) return;
+      if (pinch.active) return;
       c.dragging = true;
       c.pointerId = e.pointerId;
-      c.grabDX = c.x - e.clientX;
-      c.grabDY = c.y - e.clientY;
+      c.grabDX = c.x - toWorldX(e.clientX);
+      c.grabDY = c.y - toWorldY(e.clientY);
       c.downX = e.clientX; c.downY = e.clientY; c.downT = performance.now();
       c.moved = false;
+      c.settleAt = 0;
       el.classList.add('dragging');
       el.style.zIndex = String(++topZ);
       c.link.setPointerCapture(e.pointerId);
@@ -443,9 +596,9 @@
 
     el.addEventListener('pointermove', e => {
       if (!c.dragging || e.pointerId !== c.pointerId) return;
-      if (!c.moved && Math.hypot(e.clientX - c.downX, e.clientY - c.downY) > 6) c.moved = true;
-      c.tx = e.clientX + c.grabDX;
-      c.ty = e.clientY + c.grabDY;
+      if (!c.moved && Math.hypot(e.clientX - c.downX, e.clientY - c.downY) > DRAG_SLOP) c.moved = true;
+      c.tx = toWorldX(e.clientX) + c.grabDX;
+      c.ty = toWorldY(e.clientY) + c.grabDY;
     });
 
     const release = e => {
@@ -453,9 +606,10 @@
       c.dragging = false;
       c.pointerId = null;
       el.classList.remove('dragging');
-      const mx = c.w / 2 + 8, my = c.h / 2 + 8;
-      c.tx = Math.min(Math.max(c.tx, mx), W - mx);
-      c.ty = Math.min(Math.max(c.ty, my), H - my);
+      const b = bounds(c);
+      c.tx = Math.min(Math.max(c.tx, b.minX), b.maxX);
+      c.ty = Math.min(Math.max(c.ty, b.minY), b.maxY);
+      c.homeX = c.tx; c.homeY = c.ty;
       c.fx = c.tx / W; c.fy = c.ty / H;
     };
     el.addEventListener('pointerup', release);
@@ -467,35 +621,87 @@
     });
   }
 
+  document.getElementById('zoomOut').addEventListener('click', () => setZoom(zoom - 0.12));
+  document.getElementById('zoomIn').addEventListener('click', () => setZoom(zoom + 0.12));
+  document.getElementById('reset').addEventListener('click', resetAll);
+
+  stage.addEventListener('wheel', e => {
+    e.preventDefault();
+    setZoom(zoom * (e.deltaY > 0 ? 0.94 : 1.064));
+  }, { passive: false });
+
+  // pinch to zoom
+  const pinch = { active: false, ids: [], start: 0, base: 1, pts: new Map() };
+  stage.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch') return;
+    pinch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch.pts.size === 2) {
+      const [a, b] = [...pinch.pts.values()];
+      pinch.active = true;
+      pinch.start = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      pinch.base = zoom;
+      for (const c of cards) { c.dragging = false; c.el.classList.remove('dragging'); }
+    }
+  }, true);
+  stage.addEventListener('pointermove', e => {
+    if (!pinch.pts.has(e.pointerId)) return;
+    pinch.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!pinch.active || pinch.pts.size < 2) return;
+    const [a, b] = [...pinch.pts.values()];
+    setZoom(pinch.base * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.start));
+  }, true);
+  const endPinch = e => {
+    pinch.pts.delete(e.pointerId);
+    if (pinch.pts.size < 2) pinch.active = false;
+  };
+  stage.addEventListener('pointerup', endPinch, true);
+  stage.addEventListener('pointercancel', endPinch, true);
+
+  addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === '-' || e.key === '_') { setZoom(zoom - 0.12); e.preventDefault(); }
+    else if (e.key === '+' || e.key === '=') { setZoom(zoom + 0.12); e.preventDefault(); }
+    else if (e.key === '0' || e.key.toLowerCase() === 'r') { resetAll(); e.preventDefault(); }
+  });
+
   // ----------------------------------------------------------- simulation
-  const STIFF = 210, DAMP = 24;   // card spring
+  const STIFF = 265, DAMP = 26;   // card spring, a touch under critical
   let last = performance.now(), t = 0;
 
   function frame(now) {
     const dt = Math.min((now - last) / 1000, 1 / 30);
     last = now;
     t += dt;
-    ctx.clearRect(0, 0, W, H);
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(DPR * zoom, 0, 0, DPR * zoom,
+                     DPR * (W / 2) * (1 - zoom), DPR * (H / 2) * (1 - zoom));
 
     for (const c of cards) {
+      if (c.settleAt && now >= c.settleAt) { c.tx = c.homeX; c.ty = c.homeY; c.settleAt = 0; }
+
       const ax = (c.tx - c.x) * STIFF - c.vx * DAMP;
       const ay = (c.ty - c.y) * STIFF - c.vy * DAMP;
       c.vx += ax * dt; c.vy += ay * dt;
       c.x += c.vx * dt; c.y += c.vy * dt;
+      c.sc += (1 - c.sc) * Math.min(1, dt * 7);
 
-      const lean = Math.max(-7, Math.min(7, c.vx * 0.010));
-      c.rot += (lean - c.rot) * Math.min(1, dt * 9);
+      const lean = Math.max(-6, Math.min(6, c.vx * 0.008));
+      c.rot += (lean - c.rot) * Math.min(1, dt * 8);
 
+      // A breath, small enough that nothing reads as jitter.
       let ox = 0, oy = 0, wob = 0;
       if (!reduceMotion) {
-        ox = Math.cos(t * 0.5 + c.phase) * 1.8;
-        oy = Math.sin(t * 0.73 + c.phase) * 2.6;
-        wob = Math.sin(t * 0.62 + c.phase * 1.7) * 6.5;   // the arc breathes
+        ox = Math.cos(t * 0.31 + c.phase) * 0.9;
+        oy = Math.sin(t * 0.44 + c.phase) * 1.3;
+        wob = Math.sin(t * 0.37 + c.phase * 1.7) * 3.2;
       }
 
       c.el.style.transform =
         'translate(' + (c.x + ox - c.w / 2).toFixed(2) + 'px,' +
-                       (c.y + oy - c.h / 2).toFixed(2) + 'px) rotate(' + c.rot.toFixed(2) + 'deg)';
+                       (c.y + oy - c.h / 2).toFixed(2) + 'px) rotate(' +
+                       c.rot.toFixed(2) + 'deg) scale(' + c.sc.toFixed(3) + ')';
 
       setRest(c.rope, anchorOf(c, ox, oy), head.x, head.y, wob);
       stepRope(c.rope, dt);
@@ -514,13 +720,15 @@
   let resizeTimer = null;
   addEventListener('resize', () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(layout, 120);
+    resizeTimer = setTimeout(() => layout(false), 120);
   });
 
   const imgs = [girl, ...cards.map(c => c.el.querySelector('img'))];
   Promise.all(imgs.map(im => im.complete ? null : new Promise(r => { im.onload = r; im.onerror = r; })))
     .then(() => {
-      layout();
+      applyZoom();
+      layout(true);
+      gatherToCentre(performance.now());
       requestAnimationFrame(now => { last = now; frame(now); });
     });
 })();
