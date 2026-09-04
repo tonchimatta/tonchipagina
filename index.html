@@ -32,7 +32,9 @@
      device resolution instead, which keeps them crisp when zoomed. */
   #world {
     position: absolute; inset: 0;
-    transform-origin: 50% 50%;
+    /* Zoom pivots on the bottom edge, so the girl never lifts off the
+       floor of the page however far you pull back. */
+    transform-origin: 50% 100%;
     will-change: transform;
     z-index: 2;
   }
@@ -194,13 +196,14 @@
 
   // ---------------------------------------------------------------- zoom
   // Card and thread coordinates are world coordinates: the layout as it
-  // would sit at zoom 1. Zoom scales the whole scene about the middle of
-  // the screen, so pulling back only ever reveals more room around it.
+  // would sit at zoom 1. Zoom scales the scene about the bottom edge of
+  // the screen, so the girl stays planted on the floor of the page and
+  // pulling back opens room above and beside her.
   const MIN_ZOOM = 0.45, MAX_ZOOM = 1;
   let zoom = 1;
 
   const toWorldX = sx => (sx - W / 2) / zoom + W / 2;
-  const toWorldY = sy => (sy - H / 2) / zoom + H / 2;
+  const toWorldY = sy => (sy - H) / zoom + H;
 
   function applyZoom() {
     world.style.transform = 'scale(' + zoom + ')';
@@ -238,7 +241,7 @@
       x: 0, y: 0, vx: 0, vy: 0,      // centre and velocity, world px
       tx: 0, ty: 0,                   // spring target
       homeX: 0, homeY: 0,             // where the layout puts it
-      rot: 0, sc: 1, w: 0, h: 0,
+      rot: 0, sc: 1, w: 0, h: 0, ox: 0, oy: 0,
       phase: (i * 2.399) % (Math.PI * 2),
       dragging: false, pointerId: null,
       grabDX: 0, grabDY: 0,
@@ -250,142 +253,160 @@
   });
 
   // ------------------------------------------------------------- threads
-  // The thread has no weight of its own. It is held up by a rest shape: a
-  // cubic bezier that leaves the crown almost vertically, so every thread
-  // gathers into one bundle at the knot before splaying out to its card.
-  const SEG = 28;
-
-  // A string tied at both ends cannot swing where it is tied. Points near
-  // the knot and near the picture are held tight to that curve, and the
-  // slack, so the travel, belongs to the free middle of the span. This is
-  // what stops the thread squirming right where it meets the picture.
-  const LAG_END = 46;     // catch-up rate at a tied end (1/s)
-  const LAG_MID = 13;     // catch-up rate mid-span (1/s)
-  const PIN_SPAN = 0.24;  // fraction of the span each end holds taut
-  const GLIDE = 0.855;    // velocity retained per step: the viscosity
-  const EVEN_ITERS = 2;
-  const EVEN_FORCE = 0.10;
-
-  const lagAt = new Float64Array(SEG + 1);
-  for (let k = 0; k <= SEG; k++) {
-    const t = k / SEG;
-    const edge = Math.min(t, 1 - t) / PIN_SPAN;
-    const pin = edge >= 1 ? 0 : (1 - edge) * (1 - edge);
-    lagAt[k] = LAG_MID + (LAG_END - LAG_MID) * pin;
-  }
+  //
+  // Each thread is a real rope: a chain of point masses joined by
+  // inextensible links, in a uniform field. The field points up, so the
+  // rope holds its arch instead of hanging, and the shape it settles into
+  // is a catenary, the curve a chain takes between two fixed points. It
+  // is not drawn as a catenary, it becomes one.
+  //
+  // The links are what make it behave like rope rather than like beads on
+  // a lag: every constraint pass carries a correction to its neighbours,
+  // so a yank at the picture travels the length of the span within a
+  // frame or two and the whole rope answers, instead of only the stretch
+  // nearest the hand.
+  const SEG = 30;              // links in a rope
+  const SLACK = 1.10;          // rope length against the straight span
+  const REEL = 2.4;            // how fast a rope takes up or gives out slack (1/s)
+  const LIFT = 8200;           // the field holding the arch up (px/s^2)
+  const DRAG = 0.9965;         // velocity kept per step: air on the thread
+  const ITERS = 12;            // constraint passes, i.e. how far a tug carries
+  const FIXED = 1 / 120;       // physics runs on a fixed step, whatever the frame rate
 
   function makeRope() {
     const pts = [];
-    for (let k = 0; k <= SEG; k++) pts.push({ x: 0, y: 0, px: 0, py: 0, rx: 0, ry: 0 });
-    return { pts, len: 0, rest: 0 };
+    for (let k = 0; k <= SEG; k++) pts.push({ x: 0, y: 0, px: 0, py: 0 });
+    return { pts, seg: 0, len: 0, rest: 0 };
   }
 
-  // Rest shape control points. a is the card anchor, carrying the outward
-  // normal of the edge it is tied to; hx/hy is the knot on the head. Both
-  // control arms are capped, so a long thread cannot fling its handle far
-  // off the picture and bend the curve somewhere it has no business being.
-  function restShape(a, hx, hy, wob) {
-    let dx = a.x - hx, dy = a.y - hy;
-    const L = Math.hypot(dx, dy) || 1;
-    dx /= L; dy /= L;
-
-    // Leaving the knot: up, leaned toward the card's side. The upward
-    // term is what ties every thread into one bundle at the crown.
-    let bx = dx, by = dy - 0.95;
-    const bl = Math.hypot(bx, by) || 1;
-    bx /= bl; by /= bl;
-
-    // Leaving the card: out along the edge's normal, already bending back
-    // toward the knot, so the thread meets the picture square on instead
-    // of running flat across the row.
-    let ex = a.nx + (-dx) * 1.1, ey = a.ny + (-dy) * 1.1;
-    const el = Math.hypot(ex, ey) || 1;
-    ex /= el; ey /= el;
-
-    const armKnot = Math.min(L * 0.32, 230);
-    const armCard = Math.min(L * 0.20, 150);
-    const sway = wob * Math.min(1, L / 520);
-
-    return {
-      p0x: hx, p0y: hy,
-      p1x: hx + bx * armKnot, p1y: hy + by * armKnot + sway,
-      p2x: a.x + ex * armCard, p2y: a.y + ey * armCard - sway * 0.5,
-      p3x: a.x, p3y: a.y,
-    };
+  // ---- the catenary itself ------------------------------------------
+  // A chain of length s hung between two points obeys
+  //     sqrt(s^2 - v^2) = 2a * sinh(h / 2a)
+  // with h and v the separation across and along the field. That has one
+  // root in a, and a is the whole curve: y = a*cosh((x - xc)/a) + yc.
+  // f(a) falls from infinity to |h| as a grows, so bisection finds it.
+  function catenaryA(h, S) {
+    h = Math.abs(h);
+    let lo = h / 60 + 1e-3, hi = Math.max(h, S);
+    let guard = 0;
+    while (2 * hi * Math.sinh(h / (2 * hi)) > S && guard++ < 80) hi *= 2;
+    while (2 * lo * Math.sinh(h / (2 * lo)) < S && guard++ < 160) lo *= 0.5;
+    for (let i = 0; i < 48; i++) {
+      const mid = 0.5 * (lo + hi);
+      if (2 * mid * Math.sinh(h / (2 * mid)) > S) lo = mid; else hi = mid;
+    }
+    return 0.5 * (lo + hi);
   }
 
-  function bezier(s, t, out) {
-    const u = 1 - t;
-    const a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
-    out.x = a * s.p0x + b * s.p1x + c * s.p2x + d * s.p3x;
-    out.y = a * s.p0y + b * s.p1y + c * s.p2y + d * s.p3y;
+  // How much rope to pay out. A span lying across the field gets the full
+  // slack; one running along it gets almost none, because a rope pulled
+  // straight up its own field has nowhere to sag sideways and hangs plumb.
+  function ropeLength(K, A) {
+    const dx = A.x - K.x, dy = A.y - K.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const across = Math.abs(dx) / d;
+    return d * (1 + (SLACK - 1) * (0.08 + 0.92 * across));
   }
 
-  const tmp = { x: 0, y: 0 };
-
-  // The rest points are spread by arc length, not by the curve's own
-  // parameter. Even spacing is what keeps the thread from rippling where
-  // the arc turns tightest.
-  const SAMP = 72;
+  // Walk the catenary from the knot K to the anchor A, writing points
+  // spread evenly by arc length into out[].
+  const SAMP = 80;
   const sxs = new Float64Array(SAMP + 1);
   const sys = new Float64Array(SAMP + 1);
   const sls = new Float64Array(SAMP + 1);
 
-  function setRest(rope, a, hx, hy, wob) {
-    const s = restShape(a, hx, hy, wob);
-    const pts = rope.pts;
+  function catenaryPoints(K, A, s, out) {
+    const h = A.x - K.x;          // across the field
+    const v = K.y - A.y;          // along it, up being positive
+    const straight = () => {
+      for (let i = 0; i <= SEG; i++) {
+        const t = i / SEG;
+        out[i].x = K.x + (A.x - K.x) * t;
+        out[i].y = K.y + (A.y - K.y) * t;
+      }
+    };
+    if (Math.abs(h) < 1) { straight(); return; }
+    const S2 = s * s - v * v;
+    if (S2 <= 0) { straight(); return; }
+    const S = Math.sqrt(S2);
+    if (S <= Math.abs(h)) { straight(); return; }
+
+    const a = catenaryA(h, S);
+    // 2a*sinh(h/2a) carries the sign of h, while S is a length, so a span
+    // running leftward needs that sign put back before solving for the axis.
+    const xc = h / 2 + a * Math.asinh(v * Math.sign(h) / S);
+    const yc = a * Math.cosh(xc / a);
 
     let total = 0;
     for (let k = 0; k <= SAMP; k++) {
-      bezier(s, k / SAMP, tmp);
-      if (k) total += Math.hypot(tmp.x - sxs[k - 1], tmp.y - sys[k - 1]);
-      sxs[k] = tmp.x; sys[k] = tmp.y; sls[k] = total;
+      const X = h * k / SAMP;
+      const px = K.x + X;
+      const py = K.y - (-a * Math.cosh((X - xc) / a) + yc);
+      if (k) total += Math.hypot(px - sxs[k - 1], py - sys[k - 1]);
+      sxs[k] = px; sys[k] = py; sls[k] = total;
     }
-    rope.rest = total;
-
     let j = 0;
     for (let i = 0; i <= SEG; i++) {
       const want = total * i / SEG;
       while (j < SAMP - 1 && sls[j + 1] < want) j++;
       const span = sls[j + 1] - sls[j];
       const f = span > 1e-6 ? (want - sls[j]) / span : 0;
-      pts[i].rx = sxs[j] + (sxs[j + 1] - sxs[j]) * f;
-      pts[i].ry = sys[j] + (sys[j + 1] - sys[j]) * f;
+      out[i].x = sxs[j] + (sxs[j + 1] - sxs[j]) * f;
+      out[i].y = sys[j] + (sys[j + 1] - sys[j]) * f;
     }
   }
 
-  function snapRope(rope) {
-    for (const p of rope.pts) { p.x = p.px = p.rx; p.y = p.py = p.ry; }
+  // Drop a rope straight onto its catenary, at rest. Used on load, on a
+  // reset, and when the layout changes under it.
+  function settleRope(rope, K, A) {
+    const s = ropeLength(K, A);
+    rope.seg = s / SEG;
+    catenaryPoints(K, A, s, rope.pts);
+    for (const p of rope.pts) { p.px = p.x; p.py = p.y; }
   }
 
-  function stepRope(rope, dt) {
+  // ---- one physics step ---------------------------------------------
+  function stepRope(rope, K, A, dt) {
     const pts = rope.pts, n = pts.length;
 
+    // A rope does not change length on its own, but this one is tied to
+    // something a hand can carry off. So it goes taut when yanked and
+    // then reels back to a natural drape.
+    const want = ropeLength(K, A) / SEG;
+    rope.seg += (want - rope.seg) * (1 - Math.exp(-REEL * dt));
+    rope.rest = rope.seg * SEG;
+
+    const fall = LIFT * dt * dt;   // the field, pointing up the screen
     for (let k = 1; k < n - 1; k++) {
       const p = pts[k];
-      const catchUp = 1 - Math.exp(-lagAt[k] * dt);
-      const vx = (p.x - p.px) * GLIDE;
-      const vy = (p.y - p.py) * GLIDE;
+      const vx = (p.x - p.px) * DRAG;
+      const vy = (p.y - p.py) * DRAG;
       p.px = p.x; p.py = p.y;
-      p.x += vx + (p.rx - p.x) * catchUp;
-      p.y += vy + (p.ry - p.y) * catchUp;
+      p.x += vx;
+      p.y += vy - fall;
     }
-    // the ends are tied: the knot on the head, and the picture
-    pts[0].x = pts[0].rx; pts[0].y = pts[0].ry;
-    pts[n - 1].x = pts[n - 1].rx; pts[n - 1].y = pts[n - 1].ry;
+    pts[0].x = K.x; pts[0].y = K.y;
+    pts[n - 1].x = A.x; pts[n - 1].y = A.y;
 
-    // Keep the spacing even so the thread reads as one filament rather
-    // than bunching where it turns.
-    const target = rope.rest / (n - 1);
-    for (let it = 0; it < EVEN_ITERS; it++) {
-      for (let k = 0; k < n - 1; k++) {
+    // The links. Each pass hands a correction on to the next link, so
+    // pulling one end moves the far end too. Sweeping alternately from
+    // each end keeps the rope from leaning toward whichever it starts at.
+    const seg = rope.seg;
+    for (let it = 0; it < ITERS; it++) {
+      const fwd = (it & 1) === 0;
+      for (let q = 0; q < n - 1; q++) {
+        const k = fwd ? q : n - 2 - q;
         const a = pts[k], b = pts[k + 1];
+        const wa = k === 0 ? 0 : 1;
+        const wb = k + 1 === n - 1 ? 0 : 1;
+        const wsum = wa + wb;
+        if (!wsum) continue;
         const dx = b.x - a.x, dy = b.y - a.y;
-        const d = Math.hypot(dx, dy) || 1e-4;
-        const f = ((d - target) / d) * EVEN_FORCE;
-        const ox = dx * f, oy = dy * f;
-        if (k !== 0) { a.x += ox; a.y += oy; }
-        if (k + 1 !== n - 1) { b.x -= ox; b.y -= oy; }
+        const d = Math.hypot(dx, dy) || 1e-6;
+        const corr = (d - seg) / d;
+        const cx = dx * corr, cy = dy * corr;
+        if (wa) { a.x += cx * (wa / wsum); a.y += cy * (wa / wsum); }
+        if (wb) { b.x -= cx * (wb / wsum); b.y -= cy * (wb / wsum); }
       }
     }
 
@@ -424,22 +445,19 @@
     const cx = c.x + ox, cy = c.y + oy;
     const hw = c.w / 2, hh = c.h / 2;
     const dx = head.x - cx, dy = head.y - cy;
-    let ax, ay, nx, ny;
+    let ax, ay;
     if (Math.abs(dx) * hh > Math.abs(dy) * hw * SIDE_BIAS) {
-      nx = Math.sign(dx) || 1; ny = 0;
+      const nx = Math.sign(dx) || 1;
       ax = cx + nx * hw;
       ay = cy + Math.max(-hh * 0.55, Math.min(hh * 0.55, (dy / Math.abs(dx || 1)) * hw * 0.5));
     } else {
-      ny = Math.sign(dy) || 1; nx = 0;
+      const ny = Math.sign(dy) || 1;
       ay = cy + ny * hh;
       ax = cx + Math.max(-hw * 0.55, Math.min(hw * 0.55, (dx / Math.abs(dy || 1)) * hh * 0.5));
     }
     const r = c.rot * Math.PI / 180, cs = Math.cos(r), sn = Math.sin(r);
     const rx = ax - cx, ry = ay - cy;
-    return {
-      x: cx + rx * cs - ry * sn, y: cy + rx * sn + ry * cs,
-      nx: nx * cs - ny * sn, ny: nx * sn + ny * cs,
-    };
+    return { x: cx + rx * cs - ry * sn, y: cy + rx * sn + ry * cs };
   }
 
   // --------------------------------------------------------------- layout
@@ -473,18 +491,17 @@
       if (!snap) continue;
       c.x = c.tx; c.y = c.ty;
       c.vx = c.vy = 0;
-      setRest(c.rope, anchorOf(c, 0, 0), head.x, head.y, 0);
-      snapRope(c.rope);
+      settleRope(c.rope, head, anchorOf(c, 0, 0));
     }
   }
 
   // How far a card may travel: the visible world, which grows as you pull
   // back, so zooming out really does give more room to move things.
   function bounds(c) {
-    const halfW = W / (2 * zoom), halfH = H / (2 * zoom);
+    const halfW = W / (2 * zoom);
     const mx = c.w / 2 + 6, my = c.h / 2 + 6;
     const left = W / 2 - halfW, right = W / 2 + halfW;
-    const top = H / 2 - halfH, bottom = H / 2 + halfH;
+    const top = H - H / zoom, bottom = H;
     return {
       minX: left + mx, maxX: Math.max(left + mx, right - mx),
       minY: top + my, maxY: Math.max(top + my, bottom - my),
@@ -557,8 +574,7 @@
       c.rot = 0;
       c.sc = 0.86;
       c.settleAt = now + SETTLE_DELAY + c.i * SETTLE_STAGGER;
-      setRest(c.rope, anchorOf(c, 0, 0), head.x, head.y, 0);
-      snapRope(c.rope);
+      settleRope(c.rope, head, anchorOf(c, 0, 0));
     }
   }
 
@@ -666,18 +682,12 @@
 
   // ----------------------------------------------------------- simulation
   const STIFF = 265, DAMP = 26;   // card spring, a touch under critical
-  let last = performance.now(), t = 0;
+  let last = performance.now(), acc = 0, t = 0;
 
-  function frame(now) {
-    const dt = Math.min((now - last) / 1000, 1 / 30);
-    last = now;
+  // Cards and ropes advance together on a fixed step, so a rope behaves
+  // the same on a 60Hz screen as on a 144Hz one.
+  function simulate(dt, now) {
     t += dt;
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.setTransform(DPR * zoom, 0, 0, DPR * zoom,
-                     DPR * (W / 2) * (1 - zoom), DPR * (H / 2) * (1 - zoom));
-
     for (const c of cards) {
       if (c.settleAt && now >= c.settleAt) { c.tx = c.homeX; c.ty = c.homeY; c.settleAt = 0; }
 
@@ -690,21 +700,32 @@
       const lean = Math.max(-6, Math.min(6, c.vx * 0.008));
       c.rot += (lean - c.rot) * Math.min(1, dt * 8);
 
-      // A breath, small enough that nothing reads as jitter.
-      let ox = 0, oy = 0, wob = 0;
-      if (!reduceMotion) {
-        ox = Math.cos(t * 0.31 + c.phase) * 0.9;
-        oy = Math.sin(t * 0.44 + c.phase) * 1.3;
-        wob = Math.sin(t * 0.37 + c.phase * 1.7) * 3.2;
-      }
+      // A breath, small enough that nothing reads as jitter. The rope
+      // answers it as a rope does, along its whole length.
+      c.ox = reduceMotion ? 0 : Math.cos(t * 0.31 + c.phase) * 0.9;
+      c.oy = reduceMotion ? 0 : Math.sin(t * 0.44 + c.phase) * 1.3;
 
+      stepRope(c.rope, head, anchorOf(c, c.ox, c.oy), dt);
+    }
+  }
+
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.2);
+    last = now;
+    acc = Math.min(acc + dt, 0.25);
+    let steps = 0;
+    while (acc >= FIXED && steps < 12) { acc -= FIXED; steps++; simulate(FIXED, now); }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(DPR * zoom, 0, 0, DPR * zoom,
+                     DPR * (W / 2) * (1 - zoom), DPR * H * (1 - zoom));
+
+    for (const c of cards) {
       c.el.style.transform =
-        'translate(' + (c.x + ox - c.w / 2).toFixed(2) + 'px,' +
-                       (c.y + oy - c.h / 2).toFixed(2) + 'px) rotate(' +
+        'translate(' + (c.x + c.ox - c.w / 2).toFixed(2) + 'px,' +
+                       (c.y + c.oy - c.h / 2).toFixed(2) + 'px) rotate(' +
                        c.rot.toFixed(2) + 'deg) scale(' + c.sc.toFixed(3) + ')';
-
-      setRest(c.rope, anchorOf(c, ox, oy), head.x, head.y, wob);
-      stepRope(c.rope, dt);
       drawRope(c.rope);
     }
 
@@ -729,7 +750,7 @@
       applyZoom();
       layout(true);
       gatherToCentre(performance.now());
-      requestAnimationFrame(now => { last = now; frame(now); });
+      requestAnimationFrame(now => { last = now; acc = 0; frame(now); });
     });
 })();
 </script>
