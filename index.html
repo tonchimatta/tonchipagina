@@ -114,6 +114,7 @@
     { year: '2024', text: 'Tablilla de quejas a Ea-nasir.', href: 'https://es.wikipedia.org/wiki/Tablilla_de_Ea-nasir', src: 'img/2024.jpg' },
     { year: '2026', text: 'Unst Bus Shelter.', href: 'https://en.wikipedia.org/wiki/Unst_Bus_Shelter', src: 'img/2026.jpg' },
     { year: '2028', text: 'Papa Benedicto IX.', href: 'https://es.wikipedia.org/wiki/Benedicto_IX', src: 'img/2028.jpg' },
+    { year: '2030', text: 'Osama bin Laden', href: 'https://es.wikipedia.org/wiki/Osama_bin_Laden_(elefante)', src: 'img/2030.jpg' },
   ];
 
   // Card centres as fractions of the viewport. Wide layout keeps the right
@@ -128,6 +129,7 @@
     [0.10, 0.46], // 2024 (tall)
     [0.15, 0.78], // 2026
     [0.38, 0.79], // 2028
+    [0.62, 0.80], // 2030 (elephant)
   ];
   const LAYOUT_NARROW = [
     [0.18, 0.09], // 2001
@@ -139,6 +141,7 @@
     [0.18, 0.29], // 2024 (tall)
     [0.50, 0.50], // 2026
     [0.82, 0.51], // 2028
+    [0.50, 0.71], // 2030 (elephant)
   ];
 
   // Where the thread meets the top of the head, as a fraction of girl.png.
@@ -162,7 +165,7 @@
     fig.innerHTML = `
       <a href="${item.href}" target="_blank" rel="noopener noreferrer" draggable="false">
         <img src="${item.src}" alt="${item.year}: ${item.text}" draggable="false" loading="eager">
-        <figcaption><b>${item.year}:</b> ${item.text}</figcaption>
+        <figcaption>${item.text}</figcaption>
       </a>`;
     stage.appendChild(fig);
 
