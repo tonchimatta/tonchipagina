@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tonchi</title>
+<style>
+  :root {
+    --thread: #d3322a;
+    --ink: #2b2b2b;
+    --paper: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+  #stage {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  #threads {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+  }
+  #girl {
+    position: absolute;
+    z-index: 2;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    height: min(72vh, 620px);
+    width: auto;
+    right: 10vw;
+    bottom: 0;
+  }
+  .card {
+    position: absolute;
+    left: 0;
+    top: 0;
+    margin: 0;
+    z-index: 3;
+    width: clamp(112px, 13vw, 190px);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    will-change: transform;
+  }
+  .card.dragging { cursor: grabbing; z-index: 4; }
+  .card a {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+    outline: none;
+  }
+  .card a:focus-visible img { outline: 2px solid var(--thread); outline-offset: 3px; }
+  .card img {
+    display: block;
+    width: 100%;
+    height: auto;
+    -webkit-user-drag: none;
+    pointer-events: none;
+    box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 6px 18px rgba(0,0,0,.10);
+    transition: box-shadow .25s ease;
+  }
+  .card.dragging img { box-shadow: 0 2px 4px rgba(0,0,0,.10), 0 16px 34px rgba(0,0,0,.18); }
+  .card figcaption {
+    margin: .45em 0 0;
+    font-size: clamp(10px, .78vw, 12.5px);
+    line-height: 1.3;
+    letter-spacing: .01em;
+    color: #444;
+  }
+  .card figcaption b { font-weight: 600; color: var(--ink); }
+
+  @media (max-width: 720px) {
+    #girl { height: 40vh; right: 50%; transform: translateX(50%); }
+    .card { width: 26vw; }
+    .card figcaption { font-size: 10px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card img { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="threads"></canvas>
+  <img id="girl" src="girl.png" alt="" draggable="false">
+</div>
+
+<script>
+(() => {
+  // ---------- data ----------
+  const ITEMS = [
+    { year: '2001', text: 'Soberana Orden Militar de Malta.', href: 'https://es.wikipedia.org/wiki/Orden_de_Malta', src: 'img/2001.jpg' },
+    { year: '2003', text: 'Caso de las salchichas (1522).', href: 'https://es.wikipedia.org/wiki/Caso_de_las_salchichas', src: 'img/2003.jpg' },
+    { year: '2006', text: 'Architecture terrible.', href: 'https://en.wikipedia.org/wiki/Architecture_terrible', src: 'img/2006.jpg' },
+    { year: '2011', text: 'Hegéloco.', href: 'https://es.wikipedia.org/wiki/Heg%C3%A9loco', src: 'img/2011.jpg' },
+    { year: '2015', text: 'Large numbers.', href: 'https://en.wikipedia.org/wiki/Large_numbers', src: 'img/2015.jpg' },
+    { year: '2020', text: 'Criterion of embarrassment.', href: 'https://en.wikipedia.org/wiki/Criterion_of_embarrassment', src: 'img/2020.jpg' },
+    { year: '2024', text: 'Tablilla de quejas a Ea-nasir.', href: 'https://es.wikipedia.org/wiki/Tablilla_de_Ea-nasir', src: 'img/2024.jpg' },
+    { year: '2026', text: 'Unst Bus Shelter.', href: 'https://en.wikipedia.org/wiki/Unst_Bus_Shelter', src: 'img/2026.jpg' },
+    { year: '2028', text: 'Papa Benedicto IX.', href: 'https://es.wikipedia.org/wiki/Benedicto_IX', src: 'img/2028.jpg' },
+  ];
+
+  // Card centres as fractions of the viewport. Wide layout keeps the right
+  // side free for the girl; narrow layout stacks the cards above her.
+  const LAYOUT_WIDE = [
+    [0.13, 0.14], // 2001
+    [0.38, 0.12], // 2003
+    [0.62, 0.12], // 2006
+    [0.88, 0.14], // 2011
+    [0.33, 0.46], // 2015
+    [0.55, 0.42], // 2020
+    [0.10, 0.46], // 2024 (tall)
+    [0.15, 0.78], // 2026
+    [0.38, 0.79], // 2028
+  ];
+  const LAYOUT_NARROW = [
+    [0.18, 0.09], // 2001
+    [0.50, 0.08], // 2003
+    [0.82, 0.09], // 2006
+    [0.18, 0.50], // 2011
+    [0.50, 0.29], // 2015
+    [0.82, 0.30], // 2020
+    [0.18, 0.29], // 2024 (tall)
+    [0.50, 0.50], // 2026
+    [0.82, 0.51], // 2028
+  ];
+
+  // Where the thread meets the top of the head, as a fraction of girl.png.
+  const HEAD = { x: 235 / 385, y: 17 / 599 };
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const THREAD_COLOR = getComputedStyle(document.documentElement).getPropertyValue('--thread').trim() || '#d3322a';
+
+  // ---------- dom ----------
+  const stage = document.getElementById('stage');
+  const canvas = document.getElementById('threads');
+  const ctx = canvas.getContext('2d');
+  const girl = document.getElementById('girl');
+
+  let W = 0, H = 0, DPR = 1;
+  let head = { x: 0, y: 0 };
+
+  const cards = ITEMS.map((item, i) => {
+    const fig = document.createElement('figure');
+    fig.className = 'card';
+    fig.innerHTML = `
+      <a href="${item.href}" target="_blank" rel="noopener noreferrer" draggable="false">
+        <img src="${item.src}" alt="${item.year}: ${item.text}" draggable="false" loading="eager">
+        <figcaption><b>${item.year}:</b> ${item.text}</figcaption>
+      </a>`;
+    stage.appendChild(fig);
+
+    return {
+      el: fig,
+      link: fig.querySelector('a'),
+      i,
+      // physical state (centre of the card in px)
+      x: 0, y: 0, vx: 0, vy: 0,
+      tx: 0, ty: 0,          // spring target
+      rot: 0,                 // degrees
+      w: 0, h: 0,
+      phase: Math.random() * Math.PI * 2,
+      dragging: false,
+      pointerId: null,
+      grabDX: 0, grabDY: 0,
+      downX: 0, downY: 0, downT: 0, moved: false,
+      fx: null, fy: null,     // position chosen by the visitor, as viewport fractions
+      rope: null,
+    };
+  });
+
+  // ---------- rope (verlet chain with soft, relaxing segments) ----------
+  const SEGMENTS = 26;
+  const GRAVITY = 1400;        // px/s^2
+  const ROPE_DAMP = 0.965;     // velocity retained per step (viscosity)
+  const SOLVER_ITERS = 10;
+  const SLACK = 1.10;          // rest length vs straight-line distance
+  const RELAX = 0.035;         // how fast the thread relaxes to a new length
+
+  function makeRope(ax, ay, bx, by) {
+    const pts = [];
+    for (let k = 0; k <= SEGMENTS; k++) {
+      const t = k / SEGMENTS;
+      const x = ax + (bx - ax) * t;
+      const y = ay + (by - ay) * t;
+      pts.push({ x, y, px: x, py: y });
+    }
+    const d = Math.hypot(bx - ax, by - ay);
+    return { pts, rest: (d * SLACK) / SEGMENTS, targetRest: (d * SLACK) / SEGMENTS };
+  }
+
+  function stepRope(rope, ax, ay, bx, by, dt) {
+    const pts = rope.pts;
+    const n = pts.length;
+
+    // The thread slowly relaxes toward the current span, so a stretched
+    // thread eases back to a lazy hang instead of staying taut forever.
+    const span = Math.hypot(bx - ax, by - ay);
+    rope.targetRest = Math.max(6, (span * SLACK) / SEGMENTS);
+    rope.rest += (rope.targetRest - rope.rest) * RELAX;
+
+    // integrate
+    const g = GRAVITY * dt * dt;
+    for (let k = 1; k < n - 1; k++) {
+      const p = pts[k];
+      const vx = (p.x - p.px) * ROPE_DAMP;
+      const vy = (p.y - p.py) * ROPE_DAMP;
+      p.px = p.x; p.py = p.y;
+      p.x += vx;
+      p.y += vy + g;
+    }
+    pts[0].x = ax; pts[0].y = ay;
+    pts[n - 1].x = bx; pts[n - 1].y = by;
+
+    // constraints (segments are soft: they yield a little when over-stretched)
+    const rest = rope.rest;
+    for (let it = 0; it < SOLVER_ITERS; it++) {
+      for (let k = 0; k < n - 1; k++) {
+        const a = pts[k], b = pts[k + 1];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let d = Math.hypot(dx, dy) || 0.0001;
+        let diff = (d - rest) / d;
+        // stretching beyond rest is softer than compressing back to it
+        const stiff = d > rest ? 0.42 : 0.5;
+        dx *= diff * stiff; dy *= diff * stiff;
+        if (k !== 0) { a.x += dx; a.y += dy; }
+        if (k + 1 !== n - 1) { b.x -= dx; b.y -= dy; }
+      }
+      pts[0].x = ax; pts[0].y = ay;
+      pts[n - 1].x = bx; pts[n - 1].y = by;
+    }
+  }
+
+  function ropeLength(rope) {
+    let L = 0;
+    const p = rope.pts;
+    for (let k = 0; k < p.length - 1; k++) L += Math.hypot(p[k + 1].x - p[k].x, p[k + 1].y - p[k].y);
+    return L;
+  }
+
+  // ---------- layout ----------
+  function layout() {
+    W = window.innerWidth; H = window.innerHeight;
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    const gr = girl.getBoundingClientRect();
+    head = { x: gr.left + gr.width * HEAD.x, y: gr.top + gr.height * HEAD.y };
+
+    const narrow = W <= 720;
+    const L = narrow ? LAYOUT_NARROW : LAYOUT_WIDE;
+
+    cards.forEach((c, i) => {
+      const r = c.el.getBoundingClientRect();
+      c.w = r.width; c.h = r.height;
+      // keep a position the visitor chose; otherwise use the preset layout
+      const [fx, fy] = c.fx != null ? [c.fx, c.fy] : L[i % L.length];
+      c.x = c.tx = fx * W;
+      c.y = c.ty = fy * H;
+      c.vx = c.vy = 0;
+      const a = anchorOf(c, 0, 0);
+      c.rope = makeRope(a.x, a.y, head.x, head.y);
+      // let the rope pre-settle so it doesn't drop in on load
+      for (let k = 0; k < 90; k++) stepRope(c.rope, a.x, a.y, head.x, head.y, 1 / 60);
+    });
+  }
+
+  // The thread meets the card on the edge that faces the head.
+  function anchorOf(c, ox, oy) {
+    const cx = c.x + ox, cy = c.y + oy;
+    const dx = head.x - cx, dy = head.y - cy;
+    const hw = c.w / 2, hh = c.h / 2;
+    let ax, ay;
+    if (Math.abs(dx) * hh > Math.abs(dy) * hw) {
+      // side edge
+      ax = cx + Math.sign(dx) * hw;
+      ay = cy + (dy / Math.abs(dx || 1)) * hw * 0.35;
+    } else {
+      // top / bottom edge
+      ay = cy + Math.sign(dy) * hh;
+      ax = cx + (dx / Math.abs(dy || 1)) * hh * 0.35;
+    }
+    // rotate the anchor with the card
+    const r = c.rot * Math.PI / 180;
+    const rx = ax - cx, ry = ay - cy;
+    return { x: cx + rx * Math.cos(r) - ry * Math.sin(r), y: cy + rx * Math.sin(r) + ry * Math.cos(r) };
+  }
+
+  // ---------- interaction ----------
+  let topZ = 10;
+  cards.forEach(c => {
+    const el = c.el;
+
+    // links start a native drag-and-drop by default, which would cancel our pointer events
+    el.addEventListener('dragstart', e => e.preventDefault());
+
+    el.addEventListener('pointerdown', e => {
+      if (e.button !== undefined && e.button !== 0) return;
+      c.dragging = true;
+      c.pointerId = e.pointerId;
+      c.grabDX = c.x - e.clientX;
+      c.grabDY = c.y - e.clientY;
+      c.downX = e.clientX; c.downY = e.clientY; c.downT = performance.now();
+      c.moved = false;
+      el.classList.add('dragging');
+      // capture on the link so the click lands on the link, not on the figure
+      c.link.setPointerCapture(e.pointerId);
+      // bring to front without touching the DOM tree (re-parenting would drop pointer capture)
+      el.style.zIndex = String(++topZ);
+    });
+
+    el.addEventListener('pointermove', e => {
+      if (!c.dragging || e.pointerId !== c.pointerId) return;
+      if (!c.moved && Math.hypot(e.clientX - c.downX, e.clientY - c.downY) > 6) c.moved = true;
+      c.tx = e.clientX + c.grabDX;
+      c.ty = e.clientY + c.grabDY;
+    });
+
+    const release = e => {
+      if (!c.dragging || e.pointerId !== c.pointerId) return;
+      c.dragging = false;
+      c.pointerId = null;
+      el.classList.remove('dragging');
+      // keep it roughly on screen
+      const m = 24;
+      c.tx = Math.min(Math.max(c.tx, m), W - m);
+      c.ty = Math.min(Math.max(c.ty, m), H - m);
+      c.fx = c.tx / W; c.fy = c.ty / H;
+    };
+    el.addEventListener('pointerup', release);
+    el.addEventListener('pointercancel', release);
+
+    // A click is a press that did not travel. Drags must not open the link.
+    c.link.addEventListener('click', e => {
+      if (c.moved || performance.now() - c.downT > 600) e.preventDefault();
+    });
+  });
+
+  // ---------- simulation ----------
+  const STIFF = 190;   // card spring (1/s^2)
+  const DAMP = 22;     // card damping (1/s)
+
+  let last = performance.now();
+  let t = 0;
+
+  function frame(now) {
+    let dt = Math.min((now - last) / 1000, 1 / 30);
+    last = now;
+    t += dt;
+
+    ctx.clearRect(0, 0, W, H);
+
+    for (const c of cards) {
+      // card: damped spring toward its target (pointer while dragging, rest otherwise)
+      const ax = (c.tx - c.x) * STIFF - c.vx * DAMP;
+      const ay = (c.ty - c.y) * STIFF - c.vy * DAMP;
+      c.vx += ax * dt; c.vy += ay * dt;
+      c.x += c.vx * dt; c.y += c.vy * dt;
+
+      // a little lean in the direction of travel
+      const targetRot = Math.max(-9, Math.min(9, c.vx * 0.012));
+      c.rot += (targetRot - c.rot) * Math.min(1, dt * 10);
+
+      // idle drift, gentle enough to read as breathing
+      let ox = 0, oy = 0;
+      if (!reduceMotion) {
+        ox = Math.cos(t * 0.55 + c.phase) * 2.2;
+        oy = Math.sin(t * 0.8 + c.phase) * 3.2;
+      }
+
+      c.el.style.transform =
+        `translate(${(c.x + ox - c.w / 2).toFixed(2)}px, ${(c.y + oy - c.h / 2).toFixed(2)}px) rotate(${c.rot.toFixed(2)}deg)`;
+
+      // thread
+      const a = anchorOf(c, ox, oy);
+      const sub = 2;
+      for (let s = 0; s < sub; s++) stepRope(c.rope, a.x, a.y, head.x, head.y, dt / sub);
+      drawRope(c.rope);
+    }
+
+    // knot at the crown of the head
+    ctx.beginPath();
+    ctx.arc(head.x, head.y, 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = THREAD_COLOR;
+    ctx.fill();
+
+    requestAnimationFrame(frame);
+  }
+
+  function drawRope(rope) {
+    const p = rope.pts;
+    const n = p.length;
+
+    // a thread thins as it stretches, like a filament of something viscous
+    const natural = rope.rest * SEGMENTS;
+    const stretch = ropeLength(rope) / (natural || 1);
+    const width = 1.7 / Math.min(Math.max(stretch, 1), 2.6);
+    const alpha = 0.95 - Math.min(Math.max(stretch - 1, 0), 1.6) * 0.25;
+
+    ctx.beginPath();
+    ctx.moveTo(p[0].x, p[0].y);
+    for (let k = 1; k < n - 1; k++) {
+      const mx = (p[k].x + p[k + 1].x) / 2;
+      const my = (p[k].y + p[k + 1].y) / 2;
+      ctx.quadraticCurveTo(p[k].x, p[k].y, mx, my);
+    }
+    ctx.lineTo(p[n - 1].x, p[n - 1].y);
+    ctx.lineWidth = width;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = THREAD_COLOR;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------- boot ----------
+  function start() {
+    layout();
+    requestAnimationFrame(now => { last = now; frame(now); });
+  }
+
+  let resizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(layout, 120);
+  });
+
+  const imgs = [girl, ...cards.map(c => c.el.querySelector('img'))];
+  Promise.all(imgs.map(img => img.complete ? Promise.resolve() : new Promise(r => { img.onload = r; img.onerror = r; })))
+    .then(start);
+})();
+</script>
+</body>
+</html>
