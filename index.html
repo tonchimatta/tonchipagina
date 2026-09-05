@@ -38,17 +38,25 @@
     will-change: transform;
     z-index: 2;
   }
-  #girl {
+  #girlLink {
     position: absolute;
     z-index: 2;
-    pointer-events: none;
+    right: 23vw;
+    bottom: 0;
+    display: block;
+    line-height: 0;
+    cursor: pointer;
+  }
+  #girl {
     user-select: none;
     -webkit-user-drag: none;
     height: min(42vh, 405px);
     width: auto;
-    right: 23vw;
-    bottom: 0;
+    display: block;
+    transition: filter .2s ease;
   }
+  #girlLink:hover #girl { filter: brightness(1.04); }
+  #girlLink:focus-visible #girl { outline: 2px solid var(--thread); outline-offset: 4px; }
   .card {
     position: absolute;
     left: 0; top: 0;
@@ -108,7 +116,8 @@
   #controls svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
   @media (max-width: 860px) {
-    #girl { height: 34vh; right: 50%; transform: translateX(50%); }
+    #girlLink { right: 50%; transform: translateX(50%); }
+    #girl { height: 34vh; }
     .card figcaption { font-size: 9.5px; line-height: 1.28; }
     #controls { left: 12px; bottom: 12px; }
   }
@@ -118,7 +127,9 @@
 <div id="stage">
   <canvas id="threads"></canvas>
   <div id="world">
-    <img id="girl" src="girl.png" alt="" draggable="false">
+    <a id="girlLink" href="https://es.wikipedia.org/wiki/Trinidad_Matta" target="_blank" rel="noopener noreferrer">
+      <img id="girl" src="girl.png" alt="Trinidad Matta" draggable="false">
+    </a>
   </div>
 </div>
 
