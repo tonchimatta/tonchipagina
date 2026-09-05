@@ -138,43 +138,43 @@
   const ITEMS = [
     { text: 'Soberana Orden Militar de Malta.', href: 'https://es.wikipedia.org/wiki/Orden_de_Malta',
       src: 'img/2001.jpg', ar: 900/600,
-      wide: { w: 0.150, pos: [0.108, 0.135] }, narrow: { w: 0.280, x: 0.180, row: 0 } },
+      wide: { w: 0.146, pos: [0.104, 0.128] }, narrow: { w: 0.280, x: 0.180, row: 0 } },
 
     { text: 'Caso de las salchichas (1522).', href: 'https://es.wikipedia.org/wiki/Caso_de_las_salchichas',
       src: 'img/2003.jpg', ar: 900/675,
-      wide: { w: 0.120, pos: [0.298, 0.115] }, narrow: { w: 0.260, x: 0.500, row: 0 } },
+      wide: { w: 0.118, pos: [0.292, 0.103] }, narrow: { w: 0.260, x: 0.500, row: 0 } },
 
     { text: 'Architecture terrible.', href: 'https://en.wikipedia.org/wiki/Architecture_terrible',
       src: 'img/2006.jpg', ar: 900/600,
-      wide: { w: 0.145, pos: [0.480, 0.120] }, narrow: { w: 0.280, x: 0.820, row: 0 } },
+      wide: { w: 0.142, pos: [0.466, 0.120] }, narrow: { w: 0.280, x: 0.820, row: 0 } },
 
     { text: 'Hegéloco.', href: 'https://es.wikipedia.org/wiki/Heg%C3%A9loco',
       src: 'img/2011.jpg', ar: 890/900,
-      wide: { w: 0.098, pos: [0.655, 0.130] }, narrow: { w: 0.240, x: 0.165, row: 1 } },
+      wide: { w: 0.096, pos: [0.638, 0.100] }, narrow: { w: 0.240, x: 0.165, row: 1 } },
 
     { text: 'Large numbers.', href: 'https://en.wikipedia.org/wiki/Large_numbers',
       src: 'img/2015.jpg', ar: 900/854,
-      wide: { w: 0.120, pos: [0.240, 0.385] }, narrow: { w: 0.250, x: 0.500, row: 1 } },
+      wide: { w: 0.116, pos: [0.218, 0.325] }, narrow: { w: 0.250, x: 0.500, row: 1 } },
 
     { text: 'Criterion of embarrassment.', href: 'https://en.wikipedia.org/wiki/Criterion_of_embarrassment',
       src: 'img/2020.jpg', ar: 733/900,
-      wide: { w: 0.102, pos: [0.430, 0.380] }, narrow: { w: 0.220, x: 0.430, row: 2 } },
+      wide: { w: 0.100, pos: [0.398, 0.335] }, narrow: { w: 0.220, x: 0.430, row: 2 } },
 
     { text: 'Tablilla de quejas a Ea-nasir.', href: 'https://es.wikipedia.org/wiki/Tablilla_de_Ea-nasir',
       src: 'img/2024.jpg', ar: 511/900,
-      wide: { w: 0.074, pos: [0.055, 0.545] }, narrow: { w: 0.160, x: 0.115, row: 2 } },
+      wide: { w: 0.072, pos: [0.052, 0.478] }, narrow: { w: 0.160, x: 0.115, row: 2 } },
 
     { text: 'Unst Bus Shelter.', href: 'https://en.wikipedia.org/wiki/Unst_Bus_Shelter',
       src: 'img/2026.jpg', ar: 900/607,
-      wide: { w: 0.135, pos: [0.415, 0.760] }, narrow: { w: 0.260, x: 0.500, row: 3 } },
+      wide: { w: 0.130, pos: [0.372, 0.706] }, narrow: { w: 0.260, x: 0.500, row: 3 } },
 
     { text: 'Papa Benedicto IX.', href: 'https://es.wikipedia.org/wiki/Benedicto_IX',
       src: 'img/2028.jpg', ar: 1,
-      wide: { w: 0.118, pos: [0.190, 0.730] }, narrow: { w: 0.240, x: 0.785, row: 2 } },
+      wide: { w: 0.114, pos: [0.176, 0.652] }, narrow: { w: 0.240, x: 0.785, row: 2 } },
 
     { text: 'Osama bin Laden', href: 'https://es.wikipedia.org/wiki/Osama_bin_Laden_(elefante)',
       src: 'img/2030.jpg', ar: 900/700,
-      wide: { w: 0.102, pos: [0.925, 0.180] }, narrow: { w: 0.260, x: 0.835, row: 1 } },
+      wide: { w: 0.104, pos: [0.918, 0.186] }, narrow: { w: 0.260, x: 0.835, row: 1 } },
   ];
 
   // Where the threads are knotted, as a fraction of girl.png (crown of the head).
@@ -266,10 +266,13 @@
   // frame or two and the whole rope answers, instead of only the stretch
   // nearest the hand.
   const SEG = 30;              // links in a rope
-  const SLACK = 1.10;          // rope length against the straight span
-  const REEL = 2.4;            // how fast a rope takes up or gives out slack (1/s)
-  const LIFT = 8200;           // the field holding the arch up (px/s^2)
-  const DRAG = 0.9965;         // velocity kept per step: air on the thread
+  const SLACK = 1.085;         // rope length against the straight span
+  const REEL = 1.4;            // how fast a rope takes up or gives out slack (1/s)
+  // The field only decides how briskly a rope returns to its curve, not
+  // which curve that is: the shape comes from the slack. So a weak field
+  // makes a limp, unhurried thread without straightening the catenary.
+  const LIFT = 2600;           // the field holding the arch up (px/s^2)
+  const DRAG = 0.9976;         // velocity kept per step: air on the thread
   const ITERS = 12;            // constraint passes, i.e. how far a tug carries
   const FIXED = 1 / 120;       // physics runs on a fixed step, whatever the frame rate
 
@@ -524,6 +527,41 @@
       c.homeX = (c.fx != null ? c.fx : c.item.wide.pos[0]) * W;
       c.homeY = (c.fy != null ? c.fy : c.item.wide.pos[1]) * H;
     }
+    relax();
+  }
+
+  // The collage is laid out close-packed, which only fits on a screen of
+  // roughly the shape it was drawn for. On a shorter or narrower one the
+  // pictures would run into each other, so any pair that does is eased
+  // apart along whichever axis needs the least movement. Nothing shifts
+  // at all on a screen where the layout already fits.
+  function relax() {
+    const PAD = 9;
+    for (let pass = 0; pass < 30; pass++) {
+      let moved = 0;
+      for (let i = 0; i < cards.length; i++) {
+        for (let j = i + 1; j < cards.length; j++) {
+          const a = cards[i], b = cards[j];
+          const ox = (a.w + b.w) / 2 + PAD - Math.abs(a.homeX - b.homeX);
+          const oy = (a.h + b.h) / 2 + PAD - Math.abs(a.homeY - b.homeY);
+          if (ox <= 0 || oy <= 0) continue;
+          if (oy < ox) {
+            const s = (a.homeY < b.homeY ? -1 : 1) * oy * 0.5;
+            a.homeY += s; b.homeY -= s;
+          } else {
+            const s = (a.homeX < b.homeX ? -1 : 1) * ox * 0.5;
+            a.homeX += s; b.homeX -= s;
+          }
+          moved++;
+        }
+      }
+      for (const c of cards) {
+        const bd = bounds(c);
+        c.homeX = Math.min(Math.max(c.homeX, bd.minX), bd.maxX);
+        c.homeY = Math.min(Math.max(c.homeY, bd.minY), bd.maxY);
+      }
+      if (!moved) break;
+    }
   }
 
   // On a narrow screen the cards stack above the girl in four rows. Row
@@ -588,8 +626,9 @@
 
   // ---------------------------------------------------------- interaction
   // A press has to travel this far before it counts as dragging rather
-  // than as a click opening the article.
-  const DRAG_SLOP = 9;
+  // than as a click opening the article. Set wide, so a small waver of
+  // the hand is read as holding still, not as the start of a drag.
+  const DRAG_SLOP = 15;
 
   for (const c of cards) {
     const el = c.el;
@@ -681,7 +720,8 @@
   });
 
   // ----------------------------------------------------------- simulation
-  const STIFF = 265, DAMP = 26;   // card spring, a touch under critical
+  // A slack spring: the picture trails the hand instead of snapping to it.
+  const STIFF = 155, DAMP = 20;
   let last = performance.now(), acc = 0, t = 0;
 
   // Cards and ropes advance together on a fixed step, so a rope behaves
