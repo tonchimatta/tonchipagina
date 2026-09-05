@@ -139,11 +139,11 @@
   const ITEMS = [
     { text: 'Soberana Orden Militar de Malta.', href: 'https://es.wikipedia.org/wiki/Orden_de_Malta',
       src: 'img/2001.jpg', ar: 900/600,
-      strand: 8, wide: { w: 0.146 }, narrow: { w: 0.280, x: 0.180, row: 0 } },
+      strand: 2, wide: { w: 0.146 }, narrow: { w: 0.280, x: 0.180, row: 0 } },
 
     { text: 'Caso de las salchichas (1522).', href: 'https://es.wikipedia.org/wiki/Caso_de_las_salchichas',
       src: 'img/2003.jpg', ar: 900/675,
-      strand: 6, wide: { w: 0.118 }, narrow: { w: 0.260, x: 0.500, row: 0 } },
+      strand: 4, wide: { w: 0.118 }, narrow: { w: 0.260, x: 0.500, row: 0 } },
 
     { text: 'Architecture terrible.', href: 'https://en.wikipedia.org/wiki/Architecture_terrible',
       src: 'img/2006.jpg', ar: 900/600,
@@ -151,39 +151,40 @@
 
     { text: 'Hegéloco.', href: 'https://es.wikipedia.org/wiki/Heg%C3%A9loco',
       src: 'img/2011.jpg', ar: 890/900,
-      strand: 2, wide: { w: 0.096 }, narrow: { w: 0.240, x: 0.165, row: 1 } },
+      strand: 8, wide: { w: 0.096 }, narrow: { w: 0.240, x: 0.165, row: 1 } },
 
     { text: 'Large numbers.', href: 'https://en.wikipedia.org/wiki/Large_numbers',
       src: 'img/2015.jpg', ar: 900/854,
-      strand: 9, wide: { w: 0.116 }, narrow: { w: 0.250, x: 0.500, row: 1 } },
+      strand: 1, wide: { w: 0.116 }, narrow: { w: 0.250, x: 0.500, row: 1 } },
 
     { text: 'Criterion of embarrassment.', href: 'https://en.wikipedia.org/wiki/Criterion_of_embarrassment',
       src: 'img/2020.jpg', ar: 733/900,
-      strand: 7, wide: { w: 0.100 }, narrow: { w: 0.220, x: 0.430, row: 2 } },
+      strand: 3, wide: { w: 0.100 }, narrow: { w: 0.220, x: 0.430, row: 2 } },
 
     { text: 'Tablilla de quejas a Ea-nasir.', href: 'https://es.wikipedia.org/wiki/Tablilla_de_Ea-nasir',
       src: 'img/2024.jpg', ar: 511/900,
-      strand: 10, wide: { w: 0.072 }, narrow: { w: 0.160, x: 0.115, row: 2 } },
+      strand: 0, wide: { w: 0.072 }, narrow: { w: 0.160, x: 0.115, row: 2 } },
 
     { text: 'Unst Bus Shelter.', href: 'https://en.wikipedia.org/wiki/Unst_Bus_Shelter',
       src: 'img/2026.jpg', ar: 900/607,
-      strand: 1, wide: { w: 0.130 }, narrow: { w: 0.230, x: 0.300, row: 3 } },
+      strand: 9, wide: { w: 0.130 }, narrow: { w: 0.230, x: 0.300, row: 3 } },
 
     { text: 'Papa Benedicto IX.', href: 'https://es.wikipedia.org/wiki/Benedicto_IX',
       src: 'img/2028.jpg', ar: 1,
-      strand: 0, wide: { w: 0.114 }, narrow: { w: 0.240, x: 0.785, row: 2 } },
+      strand: 10, wide: { w: 0.114 }, narrow: { w: 0.240, x: 0.785, row: 2 } },
 
     { text: 'Osama bin Laden', href: 'https://es.wikipedia.org/wiki/Osama_bin_Laden_(elefante)',
       src: 'img/2030.jpg', ar: 900/700,
-      strand: 4, wide: { w: 0.104 }, narrow: { w: 0.260, x: 0.835, row: 1 } },
+      strand: 6, wide: { w: 0.104 }, narrow: { w: 0.260, x: 0.835, row: 1 } },
 
     { text: 'Incidente de Đorđe Martinović', href: 'https://es.wikipedia.org/wiki/Incidente_de_Đorđe_Martinović',
       src: 'img/2032.jpg', ar: 428/731,
-      strand: 3, wide: { w: 0.090 }, narrow: { w: 0.190, x: 0.700, row: 3 } },
+      strand: 7, wide: { w: 0.090 }, narrow: { w: 0.190, x: 0.700, row: 3 } },
   ];
 
-  // Where the threads are knotted, as a fraction of girl.png (crown of the head).
-  const HEAD = { x: 235 / 385, y: 17 / 599 };
+  // Where the threads are knotted, as a fraction of girl.png: a point a
+  // little behind her head, so every thread comes out from behind her hair.
+  const HEAD = { x: 232 / 385, y: 0.11 };
 
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const THREAD = getComputedStyle(document.documentElement).getPropertyValue('--thread').trim() || '#e03127';
@@ -198,6 +199,7 @@
 
   let W = 0, H = 0, DPR = 1, narrow = false;
   let head = { x: 0, y: 0 };
+  let girlBox = { x0: 0, x1: 0, y0: 0, y1: 0 };   // where she stands, world px
   let topZ = 10;
 
   // ---------------------------------------------------------------- zoom
@@ -261,55 +263,51 @@
   // ------------------------------------------------------------- threads
   //
   // The threads are not invented. Each one is a strand traced out of the
-  // "lines" vector in the Figma file: the artwork was skeletonised and the
+  // "lines" vector in the Figma file: the artwork was skeletonised, the
   // eleven strands that meet at the knot were followed from their outer tip
-  // inward. STRANDS holds them as polylines in the drawing's own units,
-  // measured from the knot, so the picture the file describes is what the
-  // page draws before anything is touched.
+  // inward, and each was smoothed into a single clean curve that leaves the
+  // knot and arrives straight at its picture. STRANDS holds them as
+  // polylines in the drawing's own units, measured from the knot, so the
+  // picture the file describes is what the page draws before anything is
+  // touched.
   const STRANDS = [
-    [0,0,-22,22,-44,45,-66,67,-92,53,-118,40,-144,27,-167,43,-194,47,-223,41,-252,34,-281,29,-311,25,-341,22,-371,20,-403,20,-432,23,-460,30,-489,37,-517,46,-543,57,-569,70,-595,85,-619,100,-643,118,-667,136,-690,156,-713,176,-736,197,-759,218,-782,239,-805,258,-828,278,-851,297,-875,316,-898,334,-923,352,-946,370,-971,387,-995,403,-1020,420,-1044,436,-1069,451,-1095,466],
-    [0,0,-33,34,-67,67,-105,46,-145,27,-181,49,-225,40,-268,31,-313,25,-359,21,-406,20,-452,18,-498,16,-545,18,-591,21,-636,27,-680,34,-724,43,-766,54,-808,67,-850,81,-890,98,-930,116,-969,136,-1008,157,-1045,179,-1082,204,-1119,230,-1155,258,-1190,288,-1224,318,-1258,351,-1290,385,-1320,420,-1350,455,-1378,490,-1404,527,-1429,564,-1452,602,-1473,640,-1494,679,-1512,718,-1530,759,-1547,799],
-    [0,0,8,-2,16,-3,23,-5,31,-6,39,-8,47,-9,55,-11,62,-13,70,-14,78,-16,86,-17,94,-19,101,-21,104,-27,108,-34,112,-40,116,-46,121,-52,125,-59,130,-64,135,-71,140,-76,145,-82,151,-88,156,-93,162,-98,168,-104,174,-109,180,-114,186,-118,192,-122,198,-126,205,-130,211,-134,218,-137,224,-140,231,-144,238,-147,244,-150,251,-152,258,-156,264,-159,272,-159],
-    [0,0,26,7,52,14,77,22,103,29,128,30,151,22,175,17,201,15,227,13,253,10,279,9,306,9,332,7,357,3,382,-1,406,-8,429,-16,452,-25,474,-35,496,-47,518,-60,538,-76,558,-93,576,-111,593,-131,607,-152,619,-174,628,-196,636,-220,643,-244,647,-269,649,-295,649,-321,649,-348,646,-374,642,-399,637,-423,630,-447,623,-471,614,-494,605,-517,595,-539,583,-561],
-    [0,0,17,-24,35,-49,36,-76,33,-105,30,-134,28,-163,25,-192,23,-221,21,-250,19,-280,18,-309,17,-339,16,-369,16,-399,15,-428,15,-458,16,-488,17,-518,18,-547,19,-577,21,-606,23,-635,25,-665,27,-694,30,-723,32,-752,35,-781,39,-809,42,-838,46,-866,50,-895,55,-923,59,-951,64,-979,68,-1008,74,-1035,80,-1063,85,-1091,91,-1118,98,-1145,104,-1173,110,-1200,116,-1227],
-    [0,0,8,-30,14,-60,9,-89,4,-117,-2,-146,-7,-174,-11,-204,-16,-232,-20,-262,-23,-291,-27,-320,-30,-350,-33,-379,-36,-409,-38,-439,-39,-469,-41,-499,-42,-530,-42,-560,-42,-591,-41,-622,-39,-652,-37,-682,-35,-712,-31,-741,-28,-770,-25,-800,-22,-830,-19,-859,-17,-889,-17,-920,-17,-951,-19,-981,-23,-1010,-28,-1039,-36,-1066,-44,-1094,-54,-1120,-67,-1146,-82,-1170,-99,-1194,-119,-1216,-142,-1236],
-    [0,0,-5,-40,-15,-77,-28,-112,-38,-148,-49,-184,-59,-220,-69,-256,-77,-294,-85,-331,-91,-368,-97,-406,-103,-444,-108,-483,-114,-521,-121,-558,-129,-595,-140,-631,-153,-666,-169,-700,-190,-731,-218,-759,-250,-779,-285,-791,-324,-793,-362,-789,-400,-783,-440,-782,-478,-789,-513,-802,-545,-821,-577,-843,-605,-871,-632,-900,-655,-931,-677,-962,-696,-995,-714,-1028,-731,-1061,-746,-1095,-762,-1129,-776,-1164,-789,-1199,-801,-1234],
-    [0,0,-6,-14,-13,-28,-19,-42,-26,-55,-33,-68,-40,-80,-46,-93,-53,-106,-60,-118,-67,-131,-74,-143,-81,-156,-89,-168,-97,-180,-104,-193,-112,-205,-120,-217,-128,-229,-136,-241,-144,-253,-153,-265,-162,-277,-170,-289,-179,-301,-188,-312,-197,-324,-206,-336,-215,-348,-224,-359,-234,-371,-243,-382,-252,-394,-262,-405,-272,-417,-282,-428,-292,-439,-303,-450,-313,-461,-324,-472,-334,-484,-345,-494,-355,-506,-367,-515],
-    [0,0,-41,-12,-71,-39,-97,-71,-125,-102,-155,-133,-185,-164,-216,-191,-249,-216,-283,-238,-318,-257,-355,-271,-395,-279,-437,-279,-476,-270,-512,-252,-545,-228,-577,-202,-611,-181,-648,-167,-690,-166,-728,-178,-762,-201,-790,-232,-813,-265,-832,-300,-849,-336,-863,-373,-877,-411,-889,-448,-900,-487,-912,-525,-922,-564,-934,-602,-947,-639,-962,-676,-981,-711,-1005,-744,-1032,-776,-1065,-801,-1099,-821,-1137,-833,-1178,-839,-1219,-834],
-    [0,0,-27,-7,-54,-14,-81,-21,-108,-28,-136,-36,-163,-43,-190,-50,-217,-57,-235,-72,-258,-84,-282,-93,-307,-101,-332,-109,-357,-116,-382,-122,-409,-126,-436,-129,-463,-131,-491,-131,-518,-131,-546,-131,-574,-130,-602,-130,-629,-128,-656,-127,-684,-126,-712,-125,-740,-125,-767,-126,-794,-128,-822,-130,-848,-133,-875,-137,-900,-143,-926,-150,-950,-158,-975,-167,-998,-178,-1021,-190,-1044,-202,-1067,-215,-1089,-229,-1112,-242],
-    [0,0,-29,30,-58,59,-91,54,-125,36,-154,14,-184,-7,-219,-22,-254,-36,-292,-45,-330,-54,-369,-59,-408,-60,-446,-60,-486,-61,-527,-62,-568,-60,-608,-56,-647,-51,-687,-47,-727,-45,-768,-42,-808,-38,-848,-37,-888,-37,-929,-38,-970,-39,-1011,-40,-1051,-43,-1091,-46,-1131,-49,-1171,-54,-1210,-60,-1249,-66,-1287,-74,-1325,-83,-1362,-94,-1399,-104,-1436,-116,-1473,-126,-1513,-130,-1549,-121,-1571,-89,-1578,-50]
+    [0,0,-39,5,-77,12,-116,15,-154,7,-191,-7,-228,-20,-265,-32,-303,-41,-342,-49,-380,-55,-419,-59,-458,-61,-498,-61,-537,-60,-576,-58,-615,-56,-654,-52,-693,-49,-732,-46,-771,-42,-810,-40,-849,-38,-888,-37,-927,-37,-966,-38,-1005,-39,-1044,-41,-1084,-45,-1122,-49,-1161,-54,-1200,-61,-1238,-68,-1276,-77,-1315,-85,-1353,-94,-1391,-102,-1430,-109,-1468,-114,-1507,-118,-1546,-122,-1585,-126,-1624,-130,-1663,-135],
+    [0,0,-25,-9,-51,-17,-76,-26,-102,-34,-127,-44,-151,-55,-176,-66,-201,-76,-227,-84,-252,-92,-279,-98,-305,-104,-331,-108,-358,-112,-385,-115,-411,-118,-438,-120,-465,-121,-492,-122,-519,-123,-546,-124,-572,-124,-599,-125,-626,-125,-653,-126,-680,-126,-707,-127,-734,-129,-761,-130,-787,-133,-814,-136,-841,-139,-867,-143,-894,-148,-920,-154,-946,-161,-972,-169,-997,-178,-1022,-188,-1047,-197,-1072,-206,-1098,-216,-1123,-225],
+    [0,0,-33,-24,-66,-46,-98,-71,-126,-99,-153,-128,-181,-158,-209,-186,-239,-213,-271,-238,-306,-258,-343,-271,-383,-274,-423,-268,-461,-256,-498,-241,-535,-224,-572,-207,-609,-192,-648,-183,-688,-183,-726,-194,-762,-213,-792,-239,-817,-271,-837,-305,-854,-342,-868,-380,-880,-418,-892,-456,-903,-495,-914,-534,-925,-572,-937,-610,-951,-648,-967,-685,-986,-720,-1009,-753,-1037,-782,-1068,-808,-1097,-836,-1126,-863,-1155,-891,-1184,-918],
+    [0,0,-7,-13,-13,-26,-20,-40,-26,-53,-33,-66,-40,-80,-46,-93,-53,-106,-60,-119,-67,-132,-75,-144,-82,-157,-90,-170,-98,-182,-106,-195,-114,-208,-122,-220,-130,-232,-138,-244,-147,-257,-155,-269,-164,-281,-173,-293,-181,-304,-190,-316,-199,-328,-208,-340,-218,-351,-227,-363,-236,-374,-246,-386,-255,-397,-265,-408,-275,-419,-285,-430,-294,-441,-304,-452,-315,-463,-325,-474,-335,-485,-345,-495,-355,-506,-365,-517],
+    [0,0,-11,-36,-22,-72,-32,-108,-42,-144,-52,-181,-60,-217,-67,-254,-74,-291,-80,-328,-86,-365,-91,-402,-96,-440,-102,-477,-109,-514,-117,-550,-126,-587,-138,-622,-153,-657,-171,-690,-194,-719,-223,-744,-256,-762,-291,-774,-328,-782,-365,-788,-402,-794,-439,-800,-476,-808,-512,-819,-547,-833,-580,-850,-610,-872,-637,-898,-661,-927,-682,-959,-700,-991,-717,-1025,-732,-1060,-746,-1094,-762,-1128,-776,-1163,-792,-1197,-806,-1232],
+    [0,0,-1,-30,-1,-60,-1,-90,-3,-120,-8,-149,-15,-178,-21,-208,-26,-237,-30,-267,-33,-297,-35,-326,-37,-356,-38,-386,-38,-416,-38,-446,-37,-476,-36,-506,-34,-536,-33,-566,-31,-596,-29,-626,-27,-656,-26,-686,-24,-716,-23,-745,-22,-775,-21,-805,-21,-835,-21,-865,-22,-895,-24,-925,-26,-955,-30,-985,-34,-1014,-40,-1044,-47,-1073,-55,-1102,-65,-1130,-75,-1158,-85,-1186,-95,-1214,-105,-1243,-115,-1271],
+    [0,0,6,-28,13,-56,20,-84,25,-113,26,-141,25,-170,23,-199,22,-228,21,-256,20,-285,19,-314,18,-343,18,-372,17,-400,17,-429,18,-458,18,-487,18,-516,19,-545,20,-573,22,-602,23,-631,25,-660,27,-688,29,-717,32,-746,35,-775,38,-803,41,-832,45,-860,49,-889,53,-918,58,-946,62,-974,67,-1003,73,-1031,78,-1059,84,-1088,91,-1116,97,-1144,103,-1172,109,-1200,115,-1228],
+    [0,0,26,5,51,10,77,16,103,21,129,24,155,26,181,27,207,27,233,26,260,24,286,20,311,16,337,10,362,3,387,-4,412,-14,436,-24,459,-35,482,-48,504,-62,525,-78,545,-95,564,-113,582,-133,598,-153,612,-176,624,-198,634,-223,643,-247,649,-273,653,-299,655,-325,655,-351,652,-377,648,-403,642,-428,634,-453,624,-478,614,-502,604,-526,594,-550,584,-575,574,-599],
+    [0,0,7,-3,14,-6,21,-9,28,-12,35,-15,42,-17,49,-20,56,-22,63,-25,70,-28,77,-31,84,-34,91,-37,97,-40,104,-44,110,-48,117,-52,123,-56,128,-61,134,-66,139,-72,144,-77,150,-83,155,-88,160,-93,166,-99,171,-104,176,-109,182,-114,188,-119,194,-124,200,-128,206,-132,212,-137,219,-140,225,-144,232,-147,239,-150,246,-152,253,-155,260,-158,267,-160,274,-163],
+    [0,0,-42,15,-83,32,-126,41,-170,35,-213,27,-257,21,-301,16,-345,13,-390,11,-434,11,-478,13,-522,16,-567,21,-610,27,-654,35,-697,44,-740,55,-783,67,-825,81,-867,96,-908,113,-948,132,-988,151,-1027,172,-1065,195,-1102,219,-1139,244,-1174,271,-1208,299,-1241,329,-1273,360,-1304,392,-1333,425,-1361,459,-1388,495,-1413,531,-1436,569,-1458,608,-1478,647,-1500,686,-1521,724,-1542,763,-1564,802],
+    [0,0,-28,8,-55,18,-82,27,-110,34,-139,36,-167,32,-196,29,-225,27,-254,25,-282,24,-311,24,-340,25,-369,26,-398,30,-426,34,-454,39,-482,46,-510,54,-537,63,-564,74,-590,87,-615,101,-640,116,-664,132,-687,149,-710,167,-732,185,-754,204,-775,223,-797,242,-818,262,-839,282,-861,301,-882,320,-904,339,-926,357,-949,375,-972,392,-995,409,-1019,426,-1042,443,-1065,460,-1089,477],
   ];
   const SEG = STRANDS[0].length / 2 - 1;
 
-  // A string tied at both ends cannot swing where it is tied. Points near
-  // the knot and near the picture are held tight to the drawn strand, and
-  // the slack, so the travel, belongs to the free middle of the span.
-  const LAG_END = 46;     // catch-up rate at a tied end (1/s)
-  const LAG_MID = 13;     // catch-up rate mid-span (1/s)
-  const PIN_SPAN = 0.24;  // fraction of the span each end holds taut
-  const GLIDE = 0.855;    // velocity retained per step: the viscosity
-  const EVEN_ITERS = 2;
-  const EVEN_FORCE = 0.10;
+  // A thread is a chain of short links simulated as a rope in a room with
+  // no gravity: it keeps its length, carries no weight, and only moves
+  // because its ends move or because it was already moving. Carry a
+  // picture off and the links nearest it follow first, the rest catching
+  // up along the chain; push it toward the knot and the slack bows out.
+  // The thread's one memory is the drawn strand: a faint pull back toward
+  // that curve, so a thread left alone settles into the drawing again.
+  const GLIDE = 0.93;     // velocity kept per step: the thickness of the air
+  const ITERS = 10;       // passes over the links per step
+  const BEND = 0.08;      // how firmly a link resists being kinked
+  const MEMORY = 1.6;     // pull toward the drawn curve (1/s)
+  const REEL = 4.5;       // how fast thread is paid out or taken in (1/s)
   const FIXED = 1 / 120;  // physics runs on a fixed step, whatever the frame rate
-
-  const lagAt = new Float64Array(SEG + 1);
-  for (let k = 0; k <= SEG; k++) {
-    const t = k / SEG;
-    const edge = Math.min(t, 1 - t) / PIN_SPAN;
-    const pin = edge >= 1 ? 0 : (1 - edge) * (1 - edge);
-    lagAt[k] = LAG_MID + (LAG_END - LAG_MID) * pin;
-  }
 
   function makeRope() {
     const pts = [];
     for (let k = 0; k <= SEG; k++) pts.push({ x: 0, y: 0, px: 0, py: 0, rx: 0, ry: 0 });
-    return { pts, len: 0, rest: 0 };
+    return { pts, len: 0, rest: 0, want: 0 };
   }
 
-  // The strand keeps its drawn shape wherever its picture goes. Carrying a
-  // picture away turns and stretches its thread by exactly the amount that
-  // carries the drawn tip onto the picture's corner: one similarity, so the
-  // curve bends and sweeps as drawn instead of collapsing toward a line.
+  // The drawn strand, carried to wherever its picture is: one similarity
+  // turns and scales the drawing by exactly the amount that puts the drawn
+  // tip on the picture, so the curve remembered is the curve as drawn.
   function setRest(rope, c, a, hx, hy) {
     const m = c.mapped, n = SEG + 1, pts = rope.pts;
     const ux = m[2 * SEG], uy = m[2 * SEG + 1];
@@ -325,39 +323,55 @@
       if (k) L += Math.hypot(x - pts[k - 1].rx, y - pts[k - 1].ry);
       pts[k].rx = x; pts[k].ry = y;
     }
-    rope.rest = L;
+    rope.want = L;
   }
 
   function snapRope(rope) {
     for (const p of rope.pts) { p.x = p.px = p.rx; p.y = p.py = p.ry; }
+    rope.rest = rope.len = rope.want;
   }
 
   function stepRope(rope, dt) {
     const pts = rope.pts, n = pts.length;
+    rope.rest += (rope.want - rope.rest) * (1 - Math.exp(-REEL * dt));
+    const mem = 1 - Math.exp(-MEMORY * dt);
 
     for (let k = 1; k < n - 1; k++) {
       const p = pts[k];
-      const catchUp = 1 - Math.exp(-lagAt[k] * dt);
       const vx = (p.x - p.px) * GLIDE;
       const vy = (p.y - p.py) * GLIDE;
       p.px = p.x; p.py = p.y;
-      p.x += vx + (p.rx - p.x) * catchUp;
-      p.y += vy + (p.ry - p.y) * catchUp;
+      p.x += vx + (p.rx - p.x) * mem;
+      p.y += vy + (p.ry - p.y) * mem;
     }
-    // the ends are tied: the knot on the head, and the picture
-    pts[0].x = pts[0].rx; pts[0].y = pts[0].ry;
-    pts[n - 1].x = pts[n - 1].rx; pts[n - 1].y = pts[n - 1].ry;
+    // the ends are tied: the knot behind her head, and the picture
+    const e0 = pts[0], e1 = pts[n - 1];
+    e0.x = e0.px = e0.rx; e0.y = e0.py = e0.ry;
+    e1.x = e1.px = e1.rx; e1.y = e1.py = e1.ry;
 
-    const target = rope.rest / (n - 1);
-    for (let it = 0; it < EVEN_ITERS; it++) {
+    const link = rope.rest / (n - 1);
+    for (let it = 0; it < ITERS; it++) {
+      // every link keeps its length; a thread pulled past its length is
+      // simply a straight one
       for (let k = 0; k < n - 1; k++) {
         const a = pts[k], b = pts[k + 1];
         const dx = b.x - a.x, dy = b.y - a.y;
-        const d = Math.hypot(dx, dy) || 1e-4;
-        const f = ((d - target) / d) * EVEN_FORCE;
-        const ox = dx * f, oy = dy * f;
-        if (k !== 0) { a.x += ox; a.y += oy; }
-        if (k + 1 !== n - 1) { b.x -= ox; b.y -= oy; }
+        const d = Math.hypot(dx, dy) || 1e-6;
+        const f = (d - link) / d;
+        if (k === 0) { b.x -= dx * f; b.y -= dy * f; }
+        else if (k + 1 === n - 1) { a.x += dx * f; a.y += dy * f; }
+        else {
+          a.x += dx * f * 0.5; a.y += dy * f * 0.5;
+          b.x -= dx * f * 0.5; b.y -= dy * f * 0.5;
+        }
+      }
+      // and resists being kinked, with the drawn bend as its natural one
+      for (let k = 1; k < n - 1; k++) {
+        const a = pts[k - 1], p = pts[k], b = pts[k + 1];
+        const mx = (a.x + b.x - a.rx - b.rx) / 2 + p.rx;
+        const my = (a.y + b.y - a.ry - b.ry) / 2 + p.ry;
+        p.x += (mx - p.x) * BEND;
+        p.y += (my - p.y) * BEND;
       }
     }
 
@@ -387,23 +401,13 @@
     ctx.globalAlpha = 1;
   }
 
-  // Where the thread is taped to the picture: the edge the strand arrives
-  // from, so the drawn approach is not broken at the last moment.
+  // Where the thread ends: the middle of the picture, under the card, so
+  // it runs straight in from whichever side it arrives and is cut off by
+  // the picture's edge, never bent around it.
   function anchorOf(c, ox, oy) {
-    const cx = c.x + ox, cy = c.y + oy;
-    const hw = c.w / 2, hh = c.h / 2;
-    const dx = head.x - cx, dy = head.y - cy;
-    let ax, ay;
-    if (Math.abs(dx) * hh > Math.abs(dy) * hw) {
-      ax = cx + (Math.sign(dx) || 1) * hw;
-      ay = cy + Math.max(-hh * 0.55, Math.min(hh * 0.55, (dy / Math.abs(dx || 1)) * hw * 0.5));
-    } else {
-      ay = cy + (Math.sign(dy) || 1) * hh;
-      ax = cx + Math.max(-hw * 0.55, Math.min(hw * 0.55, (dx / Math.abs(dy || 1)) * hh * 0.5));
-    }
-    const r = c.rot * Math.PI / 180, cs = Math.cos(r), sn = Math.sin(r);
-    const rx = ax - cx, ry = ay - cy;
-    return { x: cx + rx * cs - ry * sn, y: cy + rx * sn + ry * cs };
+    const ry = (c.w / c.item.ar - c.h) / 2 * c.sc;    // picture centre, above the caption
+    const r = c.rot * Math.PI / 180;
+    return { x: c.x + ox - ry * Math.sin(r), y: c.y + oy + ry * Math.cos(r) };
   }
 
 
@@ -424,6 +428,11 @@
     head = {
       x: toWorldX(gr.left + gr.width * HEAD.x),
       y: toWorldY(gr.top + gr.height * HEAD.y),
+    };
+
+    girlBox = {
+      x0: toWorldX(gr.left) - 8, x1: toWorldX(gr.right) + 8,
+      y0: toWorldY(gr.top) - 8, y1: toWorldY(gr.bottom),
     };
 
     if (narrow) packNarrow(toWorldY(gr.top)); else placeWide();
@@ -501,7 +510,7 @@
       mapStrand(c, sx, sy);
       const s = STRANDS[c.item.strand];
       c.homeX = c.fx != null ? c.fx * W : head.x + s[s.length - 2] * sx;
-      c.homeY = c.fy != null ? c.fy * H : head.y + s[s.length - 1] * sy;
+      c.homeY = c.fy != null ? c.fy * H : head.y + s[s.length - 1] * sy - (c.w / c.item.ar - c.h) / 2;
     }
     relax();
   }
@@ -539,6 +548,17 @@
         const ox = Math.min(c.homeX + c.w / 2, bx1) - Math.max(c.homeX - c.w / 2, bx0);
         const oy = Math.min(c.homeY + c.h / 2, by1) - Math.max(c.homeY - c.h / 2, by0);
         if (ox > 0 && oy > 0) { c.homeY -= oy; moved++; }
+      }
+      // and nothing sits on her: a picture over the girl is slid off
+      // sideways, or lifted, whichever is the shorter way out
+      for (const c of cards) {
+        const ox = Math.min(c.homeX + c.w / 2, girlBox.x1) - Math.max(c.homeX - c.w / 2, girlBox.x0);
+        const oy = Math.min(c.homeY + c.h / 2, girlBox.y1) - Math.max(c.homeY - c.h / 2, girlBox.y0);
+        if (ox <= 0 || oy <= 0) continue;
+        const gx = (girlBox.x0 + girlBox.x1) / 2;
+        const sideways = c.homeX < gx ? -(c.homeX + c.w / 2 - girlBox.x0) : girlBox.x1 - (c.homeX - c.w / 2);
+        if (Math.abs(sideways) < oy) c.homeX += sideways; else c.homeY -= oy;
+        moved++;
       }
       for (const c of cards) {
         const bd = bounds(c);
@@ -755,11 +775,6 @@
                        c.rot.toFixed(2) + 'deg) scale(' + c.sc.toFixed(3) + ')';
       drawRope(c.rope);
     }
-
-    ctx.beginPath();
-    ctx.arc(head.x, head.y, 2.4, 0, Math.PI * 2);
-    ctx.fillStyle = THREAD;
-    ctx.fill();
 
     requestAnimationFrame(frame);
   }
